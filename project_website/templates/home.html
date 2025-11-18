@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Spaces</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Inter font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/x-icon" href="https://starexec.ccs.miami.edu/starexec/images/favicon.ico" />
+    <script src="https://kit.fontawesome.com/65a259d37d.js" crossorigin="anonymous"></script>
+
+    <!-- NEW: Load Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        /* --- 1. YOUR CUSTOM GRADIENTS --- */
+        body {
+            background: -webkit-radial-gradient(
+                35.49% -18.37%,
+                55.87% 55.87%,
+                #d1aad7 0%,
+                rgba(255, 255, 255, 0) 100%
+              ),
+              -webkit-radial-gradient(-24.53% -16.02%, 70.81% 48.44%, #c88bc4 0%, rgba(
+                      255,
+                      255,
+                      255,
+                      0
+                    )
+                    100%),
+              -webkit-radial-gradient(104.86% -43.36%, 91.61% 92.58%, #7b8fdd 0%, rgba(
+                      255,
+                      255,
+                      255,
+                      0
+                    )
+                    100%),
+              -webkit-radial-gradient(-2.99% -8.69%, 50.59% 55.55%, #86bff2 9.06%, rgba(
+                      255,
+                      255,
+                      255,
+                      0
+                    )
+                    100%),
+              #f7fafc;
+            background-attachment: fixed;
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* --- 2. TREE VIEW SPECIFIC STYLES --- */
+        /* Remove default triangle marker from summary details */
+        details > summary { list-style: none; }
+        details > summary::-webkit-details-marker { display: none; }
+        
+        /* Custom arrow rotation animation */
+        .arrow-icon { transition: transform 0.2s ease; }
+        details[open] > summary .arrow-icon { transform: rotate(90deg); }
+
+        /* Link styling */
+        a { color: inherit; text-decoration: none; }
+
+        /* Style for the currently selected item in the tree */
+        .space-node.selected-node {
+            background-color: #dbeafe; /* Blue-100 */
+            color: #1d4ed8; /* Blue-700 */
+            font-weight: 600;
+        }
+        /* Fix for button inside summary padding */
+        summary > form { margin: -4px 0; }
+        summary > form > button { padding: 4px 8px; }
+        .space-node-form button.space-node {
+             /* Remove default button styling and apply flex properties */
+             all: unset;
+             display: flex;
+             align-items: center;
+             cursor: pointer;
+             transition: all 0.1s;
+             width: 100%;
+             color: inherit;
+        }
+        .space-node-form:not(.ml-5) button.space-node {
+            padding-left: 0px; /* Adjust padding for the folder button inside summary */
+        }
+        .space-node-form:not(.ml-5) {
+            padding-right: 8px; /* Compensate for removed button padding */
+        }
+    </style>
+</head>
+<body class="antialiased text-gray-800">
+
+    <div class="relative min-h-screen w-full p-4 sm:p-8 flex flex-col items-center">
+
+        {% if user.is_authenticated %}
+            <!-- Authenticated State -->
+            
+            <!-- Header / User Nav -->
+            <nav class="w-full max-w-7xl flex justify-between items-center mb-6">
+                <span class="text-sm font-medium text-gray-700">Hello, <strong>{{ user.username }}</strong>!</span>
+                <a href="{% url 'logout' %}" class="text-sm font-medium text-blue-600 hover:text-blue-800 bg-white/70 backdrop-blur-sm py-2 px-4 rounded-lg shadow-sm hover:shadow-md transition-all">
+                    Log Out
+                </a>
+            </nav>
+
+            <!-- Main Content Card (max-w-7xl changed to max-w-[90rem] for a wider layout) -->
+            <main class="w-full max-w-[90rem] bg-white/80 backdrop-blur-lg rounded-2xl shadow-xl overflow-hidden flex flex-col md:flex-row min-h-[600px]">
+                
+                <!-- LEFT PANEL: File Structure (1/3 width) -->
+                <aside class="w-full md:w-1/3 p-6 border-b md:border-b-0 md:border-r border-gray-200/60 overflow-y-auto max-h-[80vh]">
+                    <div class="flex items-center justify-between mb-6">
+                        <h3 class="text-2xl font-bold text-gray-900">My Spaces</h3>
+                    </div>
+
+                    <!-- Error Message -->
+                    {% if error %}
+                        <div class="mb-6 p-3 bg-red-100 border border-red-300 text-red-800 text-sm rounded-lg">
+                            {{ error }}
+                        </div>
+                    {% endif %}
+
+                    <!-- RECURSIVE TREE VIEW -->
+                    <div class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Hierarchy</div>
+
+                    {% if spaces_tree %}
+                        <ul class="space-y-1">
+                            <!-- We loop through the top-level items -->
+                            {% for space in spaces_tree %}
+                                <!-- REVERTED: Removed is_root_child=True -->
+                                {% include "includes/space_node.html" with space=space %}
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <!-- Empty State -->
+                        <div class="text-center p-8 border-2 border-dashed border-gray-300/50 rounded-lg">
+                            <p class="text-gray-500 text-sm">No spaces found.</p>
+                        </div>
+                    {% endif %}
+                </aside>
+
+                <!-- RIGHT PANEL: Content View (2/3 width) -->
+                <section id="content-panel" class="w-full md:w-2/3 p-8 bg-white/40 relative overflow-y-auto max-h-[80vh]">
+                    <h3 id="content-title" class="text-2xl font-bold text-gray-900 mb-6">Content</h3>
+                    
+                    <!-- Content Placeholder/Area -->
+                    <div id="content-area" class="flex flex-col items-center justify-center h-full text-gray-400 border-2 border-dashed border-gray-300/50 rounded-xl min-h-[400px] p-8">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mb-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                        </svg>
+                        <p>Select a space from the left to view contents</p>
+                    </div>
+                </section>
+
+            </main>
+
+        {% else %}
+            <!-- Logged-Out State -->
+            <div class="flex flex-col items-center justify-center min-h-screen w-full">
+                <div class="w-full max-w-md bg-white/80 backdrop-blur-lg rounded-2xl shadow-xl p-10 text-center">
+                    <h2 class="text-2xl font-bold text-gray-900 mb-6">Welcome!</h2>
+                    <p class="text-gray-600 mb-8">Please log in to access your spaces.</p>
+                    <a href="{% url 'login' %}" class="inline-block w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition-all text-center">
+                        Log In
+                    </a>
+                </div>
+            </div>
+        {% endif %}
+
+    </div>
+
+<script>
+    // Variable to track the currently selected node for styling
+    let selectedNode = null;
+    const contentArea = document.getElementById('content-area');
+    const contentTitle = document.getElementById('content-title');
+
+    function formatTable(title, data) {
+        // data.aaData contains the list of records
+        const records = data.aaData || [];
+        const count = records.length;
+
+        if (count === 0) {
+            // Determine a singular name for better messaging
+            let singularName = title;
+            if (title === 'Problems') singularName = 'problem';
+            else if (title.endsWith('s')) singularName = title.slice(0, -1);
+            
+            return `<div class="mb-4">
+                        <h4 class="text-lg font-semibold text-gray-800 border-b pb-1">${title} (0 items)</h4>
+                        <p class="text-gray-500 text-sm mt-1">No ${singularName.toLowerCase()}s found in this space.</p>
+                    </div>`;
+        }
+
+        // Display ALL records (no slicing)
+        const displayRecords = records;
+
+        let tableHtml = `
+            <div class="mb-6">
+                <h4 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-2">${title} (${count} total items)</h4>
+                <div class="overflow-x-auto bg-gray-50 p-3 rounded-lg border border-gray-200">
+                    <table class="min-w-full divide-y divide-gray-200 text-xs">
+                        <thead class="bg-gray-100">
+                            <tr>
+                                <th class="px-3 py-2 text-left font-medium text-gray-600 uppercase tracking-wider">Index</th>
+                                <th class="px-3 py-2 text-left font-medium text-gray-600 uppercase tracking-wider">Data Preview (JSON)</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200">`;
+
+        displayRecords.forEach((record, index) => {
+            // Convert the array record to a readable JSON string for preview
+            // Use JSON.stringify and then strip HTML tags for safe display
+            let recordJson = JSON.stringify(record);
+            recordJson = recordJson.replace(/<[^>]*>?/gm, ''); // Remove HTML tags
+            const dataPreview = recordJson.substring(0, 150) + (recordJson.length > 150 ? '...' : '');
+
+            tableHtml += `
+                <tr class="hover:bg-white transition-colors">
+                    <td class="px-3 py-2 whitespace-nowrap text-gray-800">${index + 1}</td>
+                    <td class="px-3 py-2 text-gray-600 font-mono">${dataPreview}</td>
+                </tr>`;
+        });
+
+        tableHtml += `
+                        </tbody>
+                    </table>
+                </div>
+            </div>`;
+        return tableHtml;
+    }
+
+    // Function to update the right content panel with aggregated data
+    function updateContent(data) {
+        contentTitle.textContent = data.title;
+        contentArea.classList.remove('border-dashed', 'items-center', 'justify-center', 'p-8');
+        contentArea.classList.add('p-0');
+
+        let html = '';
+        
+        // New Order: Jobs, Solvers, Problems (Benchmarks), Users, Subfolders
+        html += formatTable('Jobs', data.jobs);
+        html += formatTable('Solvers', data.solvers);
+        html += formatTable('Problems', data.benchmarks); // Uses 'benchmarks' key, displays 'Problems' title
+        html += formatTable('Users', data.users);
+        html += formatTable('Subfolders', data.subfolders);
+
+        contentArea.innerHTML = `<div class="p-4 sm:p-6 space-y-8 bg-white/70 rounded-xl">${html}</div>`;
+    }
+
+    function showError(message) {
+        contentTitle.textContent = 'Error';
+        contentArea.classList.remove('p-0');
+        contentArea.classList.add('border-dashed', 'items-center', 'justify-center', 'p-8');
+        contentArea.innerHTML = `
+            <div class="flex flex-col items-center justify-center h-full text-red-500 min-h-[400px]">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p class="text-center px-4">${message}</p>
+                <p class="text-xs text-gray-500 mt-2">Please check your permissions or network connection.</p>
+            </div>
+        `;
+    }
+
+    async function loadSpaceContent(form) {
+        // Find the specific button/element that was clicked for styling
+        const clickedButton = form.querySelector('.space-node');
+        
+        // 1. Update selection visual state
+        if (selectedNode) {
+            selectedNode.classList.remove('selected-node');
+        }
+        if (clickedButton) {
+             clickedButton.classList.add('selected-node');
+             selectedNode = clickedButton;
+        }
+
+        // 2. Clear content area and show a temporary title while fetching
+        contentTitle.textContent = 'Fetching content...';
+        contentArea.innerHTML = '';
+        contentArea.classList.add('border-dashed');
+
+        // 3. Prepare POST request body (FormData includes CSRF token and space_id)
+        const formData = new FormData(form);
+        const url = form.action;
+
+        // 4. Make AJAX request to Django backend
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                body: formData,
+            });
+            
+            if (!response.ok) {
+                // Handle HTTP errors returned from the server (e.g., 401, 404, 500)
+                const errorResult = await response.json();
+                throw new Error(errorResult.error || `HTTP Error: ${response.status} ${response.statusText}`);
+            }
+
+            const result = await response.json();
+            
+            if (result.success) {
+                updateContent(result.content);
+            } else {
+                showError(`Backend Error: ${result.error || 'Unknown issue'}`);
+            }
+
+        } catch (error) {
+            console.error('Fetch error:', error);
+            showError(`${error.message}`);
+        }
+    }
+
+    // Attach listener to intercept all space-node forms
+    document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('.space-node-form').forEach(form => {
+            form.addEventListener('submit', function(e) {
+                e.preventDefault(); // Stop the default browser form submission (page reload)
+                loadSpaceContent(this); // Pass the form element to the AJAX handler
+            });
+        });
+    });
+</script>
+
+</body>
+</html>

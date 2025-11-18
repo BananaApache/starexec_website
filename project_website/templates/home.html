@@ -11,10 +11,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght400;500;600;700&display=swap" rel="stylesheet">
     <link rel="icon" type="image/x-icon" href="https://starexec.ccs.miami.edu/starexec/images/favicon.ico" />
+    
+    <!-- NEW: Load Font Awesome Kit (Replaced CDN link) -->
     <script src="https://kit.fontawesome.com/65a259d37d.js" crossorigin="anonymous"></script>
-
-    <!-- NEW: Load Font Awesome for icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
     <style>
         /* --- 1. YOUR CUSTOM GRADIENTS --- */
@@ -176,15 +175,35 @@
     const contentArea = document.getElementById('content-area');
     const contentTitle = document.getElementById('content-title');
 
+    function getTableHeaders(title) {
+        if (title === 'Jobs') {
+            return ['Job', 'Status', 'Complete %', 'Running', 'Failed %', 'Date', 'Size'];
+        } else if (title === 'Solvers') {
+            return ['Solver', 'Description', 'Type'];
+        } else if (title === 'Problems') {
+            return ['Benchmark / Problem', 'Type'];
+        } else if (title === 'Users') {
+            // Note: Permissions, Status, Reports, and Developer correspond to the buttons in the aaData
+            return ['User', 'Affiliation', 'Email', 'Permissions', 'Status', 'Reports', 'Developer']; 
+        } else if (title === 'Subfolders') {
+            return ['Subfolder', 'Description'];
+        }
+        return ['Data'];
+    }
+
+
     function formatTable(title, data) {
         // data.aaData contains the list of records
         const records = data.aaData || [];
         const count = records.length;
+        const headers = getTableHeaders(title);
 
         if (count === 0) {
             // Determine a singular name for better messaging
             let singularName = title;
             if (title === 'Problems') singularName = 'problem';
+            else if (title === 'Users') singularName = 'user';
+            else if (title === 'Subfolders') singularName = 'subfolder';
             else if (title.endsWith('s')) singularName = title.slice(0, -1);
             
             return `<div class="mb-4">
@@ -193,34 +212,42 @@
                     </div>`;
         }
 
-        // Display ALL records (no slicing)
-        const displayRecords = records;
-
         let tableHtml = `
             <div class="mb-6">
                 <h4 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-2">${title} (${count} total items)</h4>
                 <div class="overflow-x-auto bg-gray-50 p-3 rounded-lg border border-gray-200">
                     <table class="min-w-full divide-y divide-gray-200 text-xs">
                         <thead class="bg-gray-100">
-                            <tr>
-                                <th class="px-3 py-2 text-left font-medium text-gray-600 uppercase tracking-wider">Index</th>
-                                <th class="px-3 py-2 text-left font-medium text-gray-600 uppercase tracking-wider">Data Preview (JSON)</th>
+                            <tr>`;
+                            
+        // Generate Header Row
+        headers.forEach(header => {
+            tableHtml += `<th class="px-3 py-2 text-left font-medium text-gray-600 uppercase tracking-wider whitespace-nowrap">${header}</th>`;
+        });
+        
+        tableHtml += `
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-200">`;
 
-        displayRecords.forEach((record, index) => {
-            // Convert the array record to a readable JSON string for preview
-            // Use JSON.stringify and then strip HTML tags for safe display
-            let recordJson = JSON.stringify(record);
-            recordJson = recordJson.replace(/<[^>]*>?/gm, ''); // Remove HTML tags
-            const dataPreview = recordJson.substring(0, 150) + (recordJson.length > 150 ? '...' : '');
+        // Generate Data Rows
+        records.forEach((record) => {
+            // record is an array of strings, where each string is the HTML content for a cell
+            tableHtml += `<tr class="hover:bg-white transition-colors">`;
+            
+            record.forEach(cellContent => {
+                // --- MANDATORY RELATIVE PATH TO ABSOLUTE PATH REPLACEMENT ---
+                // Replace the relative path for the external link icon with the absolute path
+                const absoluteCellContent = cellContent.replace(
+                    'src="/starexec/images/external.png"',
+                    'src="https://starexec.ccs.miami.edu/starexec/images/external.png"'
+                );
 
-            tableHtml += `
-                <tr class="hover:bg-white transition-colors">
-                    <td class="px-3 py-2 whitespace-nowrap text-gray-800">${index + 1}</td>
-                    <td class="px-3 py-2 text-gray-600 font-mono">${dataPreview}</td>
-                </tr>`;
+                // Insert the modified content
+                tableHtml += `<td class="px-3 py-2 text-gray-800">${absoluteCellContent}</td>`;
+            });
+
+            tableHtml += `</tr>`;
         });
 
         tableHtml += `

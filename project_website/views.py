@@ -89,17 +89,11 @@ def get_space_content(request):
 
         api_cookies = {'JSESSIONID': jsessionid}
         
-        print("Fetching content for Space ID:", space_id)
         jobs = get_jobs(api_cookies, space_id)
-        print("Jobs fetched:", jobs)
         solvers = get_solvers(api_cookies, space_id)
-        print("Solvers fetched:", solvers)
         benchmarks = get_benchmarks(api_cookies, space_id)
-        print("Benchmarks fetched:", benchmarks)
         users = get_users(api_cookies, space_id)
-        print("Users fetched:", users)
         subfolders = get_subfolder(api_cookies, space_id)
-        print("Subfolders fetched:", subfolders)
 
         try:
             results = {
@@ -171,7 +165,7 @@ def home(request):
     
     try:
         space_tree = build_space_tree(api_cookies)
-        print(space_tree)
+        # print(space_tree)
         
         context = {
             'spaces_tree': space_tree

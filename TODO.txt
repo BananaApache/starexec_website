@@ -1,10 +1,6 @@
 
  - use `if (window.event.ctrlKey)` to detect if user is command or ctrl clicking a tab
 
- - add different icons for different folders or subspaces
-
  - detect admin
 
  - move "add subspace" to subspace actions
-
- - 

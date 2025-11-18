@@ -6,10 +6,148 @@ from django.contrib.auth.models import User
 from django.contrib.auth.decorators import login_required
 from bs4 import BeautifulSoup as bs
 import json
-from django.http import JsonResponse 
-
+from django.http import JsonResponse, StreamingHttpResponse 
+import re
 
 # Create your views here.
+
+
+def get_space_xml_response(api_cookies, space_id):
+    space_id = int(space_id)
+    url = f"https://starexec.ccs.miami.edu/starexec/secure/download"
+
+    parameters = {
+        "type": "spaceXML",
+        "id": space_id,
+        "includeaattrs": True,
+        "updates": True,
+        "upid": -1,
+    }
+    
+    try:
+        r = requests.get(url, cookies=api_cookies, params=parameters, stream=True)
+        r.raise_for_status()
+        
+        if r.status_code == 200:
+             return r
+        else:
+            print(f"Unexpected status code: {r.status_code}. XML Download failed.")
+            print(r.text)
+            return None
+
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP Error: {e.response.status_code} - {e.response.reason}. XML Download failed.")
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"An unexpected request error occurred: {e}. XML Download failed.")
+        return None
+
+
+def get_space_download_response(api_cookies, space_id):
+    space_id = int(space_id)
+    url = f"https://starexec.ccs.miami.edu/starexec/secure/download"
+    
+    parameters = {
+        "type": "space",
+        "id": space_id,
+        "includesolvers": True,
+        "includebenchmarks": True,
+        "hierarchy": True,
+    }
+    
+    try:
+        r = requests.get(url, cookies=api_cookies, params=parameters, stream=True)
+        r.raise_for_status()
+        
+        if r.status_code == 200:
+             return r
+        else:
+            print(f"Unexpected status code: {r.status_code}. Download failed.")
+            print(r.text)
+            return None
+
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP Error: {e.response.status_code} - {e.response.reason}. Download failed.")
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"An unexpected request error occurred: {e}. Download failed.")
+        return None
+
+
+@login_required
+def download_space_file(request, space_id):
+    jsessionid = request.session.get('JSESSIONID') 
+
+    if not jsessionid:
+        return redirect('login')
+    
+    api_cookies = {'JSESSIONID': jsessionid}
+    
+    response = get_space_download_response(api_cookies, space_id)
+    
+    if response is None:
+        return render(request, 'home.html', {'error': f'Could not initiate download for Space ID {space_id}. Please check permissions.'})
+
+    filename = f"space_{space_id}.zip"
+    content_type = response.headers.get('Content-Type', 'application/zip')
+    
+    if 'Content-Disposition' in response.headers:
+        match = re.search(r'filename="(.*)"', response.headers['Content-Disposition'])
+        if match:
+            filename = match.group(1)
+        
+    django_response = StreamingHttpResponse(
+        response.iter_content(chunk_size=8192), 
+        content_type=content_type
+    )
+    
+    django_response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    
+    content_length = response.headers.get('Content-Length')
+    if content_length:
+        django_response['Content-Length'] = content_length
+    
+    return django_response
+
+
+@login_required
+def download_space_xml_file(request, space_id):
+    """
+    Downloads the Space XML file from StarExec by streaming the response.
+    """
+    jsessionid = request.session.get('JSESSIONID') 
+
+    if not jsessionid:
+        return redirect('login')
+    
+    api_cookies = {'JSESSIONID': jsessionid}
+    
+    response = get_space_xml_response(api_cookies, space_id)
+    
+    if response is None:
+        return render(request, 'home.html', {'error': f'Could not initiate XML download for Space ID {space_id}. Please check permissions.'})
+
+    filename = f"space_{space_id}.xml"
+    content_type = response.headers.get('Content-Type', 'application/xml')
+    
+    # Check for filename in Content-Disposition header
+    if 'Content-Disposition' in response.headers:
+        match = re.search(r'filename="(.*)"', response.headers['Content-Disposition'])
+        if match:
+            filename = match.group(1)
+        
+    django_response = StreamingHttpResponse(
+        response.iter_content(chunk_size=8192), 
+        content_type=content_type
+    )
+    
+    django_response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    
+    content_length = response.headers.get('Content-Length')
+    if content_length:
+        django_response['Content-Length'] = content_length
+    
+    return django_response
 
 
 def get_jobs(api_cookies, space_id):

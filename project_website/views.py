@@ -14,7 +14,7 @@ import re
 
 def get_space_xml_response(api_cookies, space_id):
     space_id = int(space_id)
-    url = f"https://starexec.ccs.miami.edu/starexec/secure/download"
+    url = f"https://starexec.acorn.miami.edu/starexec/secure/download"
 
     parameters = {
         "type": "spaceXML",
@@ -45,7 +45,7 @@ def get_space_xml_response(api_cookies, space_id):
 
 def get_space_download_response(api_cookies, space_id):
     space_id = int(space_id)
-    url = f"https://starexec.ccs.miami.edu/starexec/secure/download"
+    url = f"https://starexec.acorn.miami.edu/starexec/secure/download"
     
     parameters = {
         "type": "space",
@@ -158,7 +158,7 @@ def get_jobs(api_cookies, space_id):
         'iSortCol_0': '0',
     }
     
-    response = requests.post(f"https://starexec.ccs.miami.edu/starexec/services/space/{space_id}/jobs/pagination", cookies=api_cookies, data=data)
+    response = requests.post(f"https://starexec.acorn.miami.edu/starexec/services/space/{space_id}/jobs/pagination", cookies=api_cookies, data=data)
     
     return response.json()
 
@@ -171,7 +171,7 @@ def get_solvers(api_cookies, space_id):
         'iSortCol_0': '0',
     }
     
-    response = requests.post(f"https://starexec.ccs.miami.edu/starexec/services/space/{space_id}/solvers/pagination", cookies=api_cookies, data=data)
+    response = requests.post(f"https://starexec.acorn.miami.edu/starexec/services/space/{space_id}/solvers/pagination", cookies=api_cookies, data=data)
     
     return response.json()
 
@@ -184,7 +184,7 @@ def get_benchmarks(api_cookies, space_id):
         'iSortCol_0': '0',
     }
     
-    response = requests.post(f"https://starexec.ccs.miami.edu/starexec/services/space/{space_id}/benchmarks/pagination", cookies=api_cookies, data=data)
+    response = requests.post(f"https://starexec.acorn.miami.edu/starexec/services/space/{space_id}/benchmarks/pagination", cookies=api_cookies, data=data)
     
     return response.json()
 
@@ -197,7 +197,7 @@ def get_users(api_cookies, space_id):
         'iSortCol_0': '0',
     }
     
-    response = requests.post(f"https://starexec.ccs.miami.edu/starexec/services/space/{space_id}/users/pagination", cookies=api_cookies, data=data)
+    response = requests.post(f"https://starexec.acorn.miami.edu/starexec/services/space/{space_id}/users/pagination", cookies=api_cookies, data=data)
     
     return response.json()
 
@@ -210,7 +210,7 @@ def get_subfolder(api_cookies, space_id):
         'iSortCol_0': '0',
     }
     
-    response = requests.post(f"https://starexec.ccs.miami.edu/starexec/services/space/{space_id}/spaces/pagination", cookies=api_cookies, data=data)
+    response = requests.post(f"https://starexec.acorn.miami.edu/starexec/services/space/{space_id}/spaces/pagination", cookies=api_cookies, data=data)
     
     return response.json()
 
@@ -265,7 +265,7 @@ def build_space_tree(api_cookies, space_id=-1, level=0, parent_name=''):
     }
     
     try:
-        response = requests.get("https://starexec.ccs.miami.edu/starexec/services/space/subspaces", cookies=api_cookies, params=params)
+        response = requests.get("https://starexec.acorn.miami.edu/starexec/services/space/subspaces", cookies=api_cookies, params=params)
         response.raise_for_status()
         subspaces = response.json()
                 
@@ -325,7 +325,7 @@ def login_view(request):
         try:
             api_session = requests.Session() 
             
-            api_response = api_session.get("https://starexec.ccs.miami.edu/starexec/secure/index.jsp")
+            api_response = api_session.get("https://starexec.acorn.miami.edu/starexec/secure/index.jsp")
             jsessionid = api_response.cookies.get('JSESSIONID')
          
             headers = {
@@ -341,7 +341,7 @@ def login_view(request):
                 'cookieexists': 'false'
             }
             
-            api_response = api_session.post("https://starexec.ccs.miami.edu/starexec/secure/j_security_check",
+            api_response = api_session.post("https://starexec.acorn.miami.edu/starexec/secure/j_security_check",
                                             headers=headers,
                                             data=data
                                            )

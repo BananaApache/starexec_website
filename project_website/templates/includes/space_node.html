@@ -1,205 +1,124 @@
-{# This file renders ONE item, and then recursively includes itself for children #}
+{# Every space is now a folder that contains 5 categories #}
+<li class="select-none my-0.5">
+    <details class="group">
+        {# 1. The Space Header (Just a toggle, does not load content) #}
+        <summary class="flex items-center py-1.5 px-2 rounded-lg hover:bg-gray-200 cursor-pointer transition-colors text-sm text-gray-700">
+            {# Arrow Icon #}
+            <svg class="arrow-icon w-3.5 h-3.5 text-gray-400 mr-2 shrink-0 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+            </svg>
+            
+            {# Icon Logic based on space attributes #}
+            {% if space.data == "Users" %}
+                <i class="fa-solid fa-address-card w-4 h-4 text-blue-500 mr-2"></i>
+            {% elif space.is_child_of_users %}
+                <i class="fa-solid fa-house-chimney-user w-4 h-4 text-blue-300 mr-2"></i>
+            {% elif space.level == 1 %}
+                <i class="fa-solid fa-people-group w-4 h-4 text-gray-900 mr-2"></i>
+            {% else %}
+                <i class="fa-solid fa-folder w-4 h-4 text-blue-500 mr-2"></i>
+            {% endif %}
+            
+            <span class="truncate font-semibold">{{ space.data }}</span>
+        </summary>
 
-{% if space.children %}
-    {# FOLDER ICON LOGIC #}
-    
-    {% if space.data == "Users" %}
-        {# Condition 1: The special 'Users' folder (Address Card Icon - Blue) #}
-        {% with icon_svg='<i class="fa-solid fa-address-card w-4 h-4 text-blue-500 mr-2 shrink-0 flex items-center justify-center"></i>' %}
-            <li class="select-none">
-                <!-- FOLDER (Has Children) - Details for Toggling -->
-                <details class="group">
-                    <summary 
-                        class="flex items-center py-1 rounded-md hover:bg-gray-200 cursor-pointer transition-colors text-sm text-gray-700"
-                    >
-                        <!-- Arrow Icon (Rotates via CSS) -->
-                        <svg class="arrow-icon w-4 h-4 text-gray-400 mr-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                        </svg>
-                        
-                        <!-- Form Submission for Folder/Summary -->
-                        <form method="POST" action="{% url 'get_space_content' %}" class="space-node-form flex-grow flex items-center">
-                            {% csrf_token %}
-                            <input type="hidden" name="space_id" value="{{ space.attr.id }}">
-                            <input type="hidden" name="space_name" value="{{ space.data}}">
-
-                            <button type="submit" class="space-node flex items-center w-full text-left py-1 -my-1">
-                                <!-- Custom Icon goes here -->
-                                {{ icon_svg|safe }}
-                                
-                                <!-- Space Name -->
-                                <span class="truncate font-medium">{{ space.data }}</span>
-                            </button>
-                        </form>
-                    </summary>
-
-                    <!-- RECURSIVE CHILDREN LIST -->
-                    <ul class="pl-4 border-l border-gray-200 ml-2.5 mt-1">
-                        {% for child in space.children %}
-                            {% include "includes/space_node.html" with space=child %}
-                        {% endfor %}
-                    </ul>
-                </details>
-            </li>
-        {% endwith %}
-    {% elif space.is_child_of_users %}
-        {# Condition 2: Direct child of a 'Users' folder (Home Chimney User Icon - Light Blue) #}
-        {% with icon_svg='<i class="fa-solid fa-house-chimney-user w-4 h-4 text-blue-300 mr-2 shrink-0 flex items-center justify-center"></i>' %}
-            <li class="select-none">
-                <!-- FOLDER (Has Children) - Details for Toggling -->
-                <details class="group">
-                    <summary 
-                        class="flex items-center py-1 rounded-md hover:bg-gray-200 cursor-pointer transition-colors text-sm text-gray-700"
-                    >
-                        <!-- Arrow Icon (Rotates via CSS) -->
-                        <svg class="arrow-icon w-4 h-4 text-gray-400 mr-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                        </svg>
-                        
-                        <!-- Form Submission for Folder/Summary -->
-                        <form method="POST" action="{% url 'get_space_content' %}" class="space-node-form flex-grow flex items-center">
-                            {% csrf_token %}
-                            <input type="hidden" name="space_id" value="{{ space.attr.id }}">
-                            <input type="hidden" name="space_name" value="{{ space.data}}">
-
-                            <button type="submit" class="space-node flex items-center w-full text-left py-1 -my-1">
-                                <!-- Custom Icon goes here -->
-                                {{ icon_svg|safe }}
-                                
-                                <!-- Space Name -->
-                                <span class="truncate font-medium">{{ space.data }}</span>
-                            </button>
-                        </form>
-                    </summary>
-
-                    <!-- RECURSIVE CHILDREN LIST -->
-                    <ul class="pl-4 border-l border-gray-200 ml-2.5 mt-1">
-                        {% for child in space.children %}
-                            {% include "includes/space_node.html" with space=child %}
-                        {% endfor %}
-                    </ul>
-                </details>
-            </li>
-        {% endwith %}
-    {% elif space.level == 1 %}
-        {# Condition 3: Level 1 folder (People Group Icon - Black/Dark Gray) #}
-        {% with icon_svg='<i class="fa-solid fa-people-group w-4 h-4 text-gray-900 mr-2 shrink-0 flex items-center justify-center"></i>' %}
-            <li class="select-none">
-                <!-- FOLDER (Has Children) - Details for Toggling -->
-                <details class="group">
-                    <summary 
-                        class="flex items-center py-1 rounded-md hover:bg-gray-200 cursor-pointer transition-colors text-sm text-gray-700"
-                    >
-                        <!-- Arrow Icon (Rotates via CSS) -->
-                        <svg class="arrow-icon w-4 h-4 text-gray-400 mr-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                        </svg>
-                        
-                        <!-- Form Submission for Folder/Summary -->
-                        <form method="POST" action="{% url 'get_space_content' %}" class="space-node-form flex-grow flex items-center">
-                            {% csrf_token %}
-                            <input type="hidden" name="space_id" value="{{ space.attr.id }}">
-                            <input type="hidden" name="space_name" value="{{ space.data}}">
-
-                            <button type="submit" class="space-node flex items-center w-full text-left py-1 -my-1">
-                                <!-- Custom Icon goes here -->
-                                {{ icon_svg|safe }}
-                                
-                                <!-- Space Name -->
-                                <span class="truncate font-medium">{{ space.data }}</span>
-                            </button>
-                        </form>
-                    </summary>
-
-                    <!-- RECURSIVE CHILDREN LIST -->
-                    <ul class="pl-4 border-l border-gray-200 ml-2.5 mt-1">
-                        {% for child in space.children %}
-                            {% include "includes/space_node.html" with space=child %}
-                        {% endfor %}
-                    </ul>
-                </details>
-            </li>
-        {% endwith %}
-    {% else %}
-        {# Condition 4: Default folder (Blue Folder Icon - Blue) #}
-        {% with icon_svg='<svg class="w-4 h-4 text-blue-500 mr-2 shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>' %}
-            <li class="select-none">
-                <!-- FOLDER (Has Children) - Details for Toggling -->
-                <details class="group">
-                    <summary 
-                        class="flex items-center py-1 rounded-md hover:bg-gray-200 cursor-pointer transition-colors text-sm text-gray-700"
-                    >
-                        <!-- Arrow Icon (Rotates via CSS) -->
-                        <svg class="arrow-icon w-4 h-4 text-gray-400 mr-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                        </svg>
-                        
-                        <!-- Form Submission for Folder/Summary -->
-                        <form method="POST" action="{% url 'get_space_content' %}" class="space-node-form flex-grow flex items-center">
-                            {% csrf_token %}
-                            <input type="hidden" name="space_id" value="{{ space.attr.id }}">
-                            <input type="hidden" name="space_name" value="{{ space.data}}">
-
-                            <button type="submit" class="space-node flex items-center w-full text-left py-1 -my-1">
-                                <!-- Default Folder Icon -->
-                                {{ icon_svg|safe }}
-                                
-                                <!-- Space Name -->
-                                <span class="truncate font-medium">{{ space.data }}</span>
-                            </button>
-                        </form>
-                    </summary>
-
-                    <!-- RECURSIVE CHILDREN LIST -->
-                    <ul class="pl-4 border-l border-gray-200 ml-2.5 mt-1">
-                        {% for child in space.children %}
-                            {% include "includes/space_node.html" with space=child %}
-                        {% endfor %}
-                    </ul>
-                </details>
-            </li>
-        {% endwith %}
-    {% endif %}
-
-{# LEAF ICON LOGIC (No children - File Icon) #}
-{% else %}
-    {% if space.is_child_of_users %}
-        {# Condition 5: Direct child of a 'Users' folder (Home Chimney User Icon - Light Blue) - Leaf Node #}
-        {% with icon_svg='<i class="fa-solid fa-house-chimney-user w-4 h-4 text-blue-300 mr-2 shrink-0 flex items-center justify-center"></i>' %}
-            <li class="select-none hover:bg-gray-200">
-                <!-- LEAF (No Children/File) - Use a direct form submission -->
-                <form method="POST" action="{% url 'get_space_content' %}" class="space-node-form ml-5">
+        {# 2. The 5 Expandable Categories #}
+        {# REDUCED INDENTATION: pl-2 ml-1 (was pl-6 ml-3) #}
+        <ul class="pl-2 border-l border-gray-100 ml-1 mt-1 space-y-0.5">
+            
+            {# Category: Jobs #}
+            <li>
+                <form method="POST" action="{% url 'get_space_content' %}" class="space-node-form w-full">
                     {% csrf_token %}
                     <input type="hidden" name="space_id" value="{{ space.attr.id }}">
-                    <input type="hidden" name="space_name" value="{{ space.data}}">
+                    <input type="hidden" name="space_name" value="{{ space.data }}">
+                    <input type="hidden" name="type" value="jobs">
                     
-                    <button type="submit" class="space-node flex items-center py-1 px-2 rounded-md hover:bg-gray-200 cursor-pointer transition-colors text-sm text-gray-700 w-full text-left">
-                        <!-- Custom Person Icon -->
-                        {{ icon_svg|safe }}
-                        
-                        <span class="truncate">{{ space.data }}</span>
+                    <button type="submit" class="space-node flex items-center w-full py-1 px-2 rounded hover:bg-orange-50 text-xs text-gray-600 transition-colors">
+                        <i class="fa-solid fa-list-check text-orange-400 w-5 text-center mr-1"></i>
+                        <span>Jobs</span>
                     </button>
                 </form>
             </li>
-        {% endwith %}
-    {% else %}
-        {# Condition 6: Default Leaf Icon (Black/Dark Gray) #}
-        {% with icon_svg='<svg class="w-4 h-4 text-gray-900 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>' %}
-            <li class="select-none hover:bg-gray-200">
-                <!-- LEAF (No Children/File) - Use a direct form submission -->
-                <form method="POST" action="{% url 'get_space_content' %}" class="space-node-form ml-5">
+
+            {# Category: Solvers #}
+            <li>
+                <form method="POST" action="{% url 'get_space_content' %}" class="space-node-form w-full">
                     {% csrf_token %}
                     <input type="hidden" name="space_id" value="{{ space.attr.id }}">
-                    <input type="hidden" name="space_name" value="{{ space.data}}">
+                    <input type="hidden" name="space_name" value="{{ space.data }}">
+                    <input type="hidden" name="type" value="solvers">
                     
-                    <button type="submit" class="space-node flex items-center py-1 px-2 rounded-md hover:bg-gray-200 cursor-pointer transition-colors text-sm text-gray-700 w-full text-left">
-                        <!-- Default File Icon -->
-                        {{ icon_svg|safe }}
-                        
-                        <span class="truncate">{{ space.data }}</span>
+                    <button type="submit" class="space-node flex items-center w-full py-1 px-2 rounded hover:bg-purple-50 text-xs text-gray-600 transition-colors">
+                        <i class="fa-solid fa-microchip text-purple-400 w-5 text-center mr-1"></i>
+                        <span>Solvers</span>
                     </button>
                 </form>
             </li>
-        {% endwith %}
-    {% endif %}
-{% endif %}
+
+            {# Category: Problems (Benchmarks) #}
+            <li>
+                <form method="POST" action="{% url 'get_space_content' %}" class="space-node-form w-full">
+                    {% csrf_token %}
+                    <input type="hidden" name="space_id" value="{{ space.attr.id }}">
+                    <input type="hidden" name="space_name" value="{{ space.data }}">
+                    <input type="hidden" name="type" value="benchmarks">
+                    
+                    <button type="submit" class="space-node flex items-center w-full py-1 px-2 rounded hover:bg-green-50 text-xs text-gray-600 transition-colors">
+                        <i class="fa-solid fa-file-code text-green-400 w-5 text-center mr-1"></i>
+                        <span>Problems</span>
+                    </button>
+                </form>
+            </li>
+
+            {# Category: Users #}
+            <li>
+                <form method="POST" action="{% url 'get_space_content' %}" class="space-node-form w-full">
+                    {% csrf_token %}
+                    <input type="hidden" name="space_id" value="{{ space.attr.id }}">
+                    <input type="hidden" name="space_name" value="{{ space.data }}">
+                    <input type="hidden" name="type" value="users">
+                    
+                    <button type="submit" class="space-node flex items-center w-full py-1 px-2 rounded hover:bg-blue-50 text-xs text-gray-600 transition-colors">
+                        <i class="fa-solid fa-users text-blue-400 w-5 text-center mr-1"></i>
+                        <span>Users</span>
+                    </button>
+                </form>
+            </li>
+
+            {# Category: Subfolders (Recursive Parent) #}
+            <li>
+                <details class="group/sub">
+                    {# REMOVED FORM SUBMISSION - Just a Toggle #}
+                    <summary class="flex items-center w-full py-1 px-2 rounded hover:bg-gray-100 text-xs text-gray-600 cursor-pointer transition-colors list-none select-none">
+                        <div class="flex items-center flex-grow text-left">
+                            <i class="fa-regular fa-folder-open text-gray-500 w-5 text-center mr-1"></i>
+                            <span>Subspaces</span>
+                            {% if space.children %}
+                                <span class="ml-auto text-[10px] bg-gray-200 px-1.5 rounded-full text-gray-500">{{ space.children|length }}</span>
+                            {% endif %}
+                        </div>
+                        
+                        {# Toggle arrow for subfolder tree #}
+                        {% if space.children %}
+                             <svg class="arrow-icon w-3 h-3 text-gray-400 ml-2 transition-transform group-open/sub:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                            </svg>
+                        {% endif %}
+                    </summary>
+
+                    {# Recursive Children #}
+                    {% if space.children %}
+                        {# REDUCED INDENTATION: pl-2 #}
+                        <ul class="pl-2 mt-1">
+                            {% for child in space.children %}
+                                {% include "includes/space_node.html" with space=child %}
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+                </details>
+            </li>
+
+        </ul>
+    </details>
+</li>

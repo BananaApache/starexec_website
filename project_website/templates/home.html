@@ -4,75 +4,39 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>My Spaces</title>
-    <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Load Inter font -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="icon" type="image/x-icon" href="https://starexec.ccs.miami.edu/starexec/images/favicon.ico" />
-    
-    <!-- NEW: Load Font Awesome Kit (Replaced CDN link) -->
     <script src="https://kit.fontawesome.com/65a259d37d.js" crossorigin="anonymous"></script>
 
     <style>
-        /* --- 1. YOUR CUSTOM GRADIENTS --- */
         body {
-            background: -webkit-radial-gradient(
-                35.49% -18.37%,
-                55.87% 55.87%,
-                #d1aad7 0%,
-                rgba(255, 255, 255, 0) 100%
-              ),
-              -webkit-radial-gradient(-24.53% -16.02%, 70.81% 48.44%, #c88bc4 0%, rgba(
-                      255,
-                      255,
-                      255,
-                      0
-                    )
-                    100%),
-              -webkit-radial-gradient(104.86% -43.36%, 91.61% 92.58%, #7b8fdd 0%, rgba(
-                      255,
-                      255,
-                      255,
-                      0
-                    )
-                    100%),
-              -webkit-radial-gradient(-2.99% -8.69%, 50.59% 55.55%, #86bff2 9.06%, rgba(
-                      255,
-                      255,
-                      255,
-                      0
-                    )
-                    100%),
-              #f7fafc;
+            background: -webkit-radial-gradient(35.49% -18.37%, 55.87% 55.87%, #d1aad7 0%, rgba(255, 255, 255, 0) 100%),
+                        -webkit-radial-gradient(-24.53% -16.02%, 70.81% 48.44%, #c88bc4 0%, rgba(255, 255, 255, 0) 100%),
+                        -webkit-radial-gradient(104.86% -43.36%, 91.61% 92.58%, #7b8fdd 0%, rgba(255, 255, 255, 0) 100%),
+                        -webkit-radial-gradient(-2.99% -8.69%, 50.59% 55.55%, #86bff2 9.06%, rgba(255, 255, 255, 0) 100%),
+                        #f7fafc;
             background-attachment: fixed;
             font-family: 'Inter', sans-serif;
         }
 
-        /* --- 2. TREE VIEW SPECIFIC STYLES --- */
-        /* Remove default triangle marker from summary details */
         details > summary { list-style: none; }
         details > summary::-webkit-details-marker { display: none; }
-        
-        /* Custom arrow rotation animation */
         .arrow-icon { transition: transform 0.2s ease; }
         details[open] > summary .arrow-icon { transform: rotate(90deg); }
+        details[open] .arrow-icon { transform: rotate(90deg); }
 
-        /* Link styling */
         a { color: inherit; text-decoration: none; }
 
-        /* Style for the currently selected item in the tree */
         .space-node.selected-node {
-            background-color: #dbeafe; /* Blue-100 */
-            color: #1d4ed8; /* Blue-700 */
+            background-color: #eff6ff;
+            color: #1d4ed8;
             font-weight: 600;
         }
-        /* Fix for button inside summary padding */
-        summary > form { margin: -4px 0; }
-        summary > form > button { padding: 4px 8px; }
+        
         .space-node-form button.space-node {
-             /* Remove default button styling and apply flex properties */
              all: unset;
              display: flex;
              align-items: center;
@@ -81,11 +45,14 @@
              width: 100%;
              color: inherit;
         }
-        .space-node-form:not(.ml-5) button.space-node {
-            padding-left: 0px; /* Adjust padding for the folder button inside summary */
+        
+        /* Fade in animation for modal */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
         }
-        .space-node-form:not(.ml-5) {
-            padding-right: 8px; /* Compensate for removed button padding */
+        .animate-fade-in {
+            animation: fadeIn 0.2s ease-out forwards;
         }
     </style>
 </head>
@@ -94,9 +61,6 @@
     <div class="relative min-h-screen w-full p-4 sm:p-8 flex flex-col items-center">
 
         {% if user.is_authenticated %}
-            <!-- Authenticated State -->
-            
-            <!-- Header / User Nav -->
             <nav class="w-full max-w-7xl flex justify-between items-center mb-6">
                 <span class="text-sm font-medium text-gray-700">Hello, <strong>{{ user.username }}</strong>!</span>
                 <a href="{% url 'logout' %}" class="text-sm font-medium text-blue-600 hover:text-blue-800 bg-white/70 backdrop-blur-sm py-2 px-4 rounded-lg shadow-sm hover:shadow-md transition-all">
@@ -104,61 +68,42 @@
                 </a>
             </nav>
 
-            <!-- Main Content Card (max-w-7xl changed to max-w-[90rem] for a wider layout) -->
             <main class="w-full max-w-[90rem] bg-white/80 backdrop-blur-lg rounded-2xl shadow-xl overflow-hidden flex flex-col md:flex-row min-h-[85vh]">
-                
-                <!-- LEFT PANEL: File Structure (1/3 width) -->
                 <aside class="w-full md:w-1/3 p-6 border-b md:border-b-0 md:border-r border-gray-200/60 overflow-y-auto max-h-[80vh]">
                     <div class="flex items-center justify-between mb-6">
                         <h3 class="text-2xl font-bold text-gray-900">My Spaces</h3>
                     </div>
-
-                    <!-- Error Message -->
                     {% if error %}
                         <div class="mb-6 p-3 bg-red-100 border border-red-300 text-red-800 text-sm rounded-lg">
                             {{ error }}
                         </div>
                     {% endif %}
-
-                    <!-- RECURSIVE TREE VIEW -->
                     <div class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Hierarchy</div>
-
                     {% if spaces_tree %}
                         <ul class="space-y-1">
-                            <!-- We loop through the top-level items -->
                             {% for space in spaces_tree %}
-                                <!-- REVERTED: Removed is_root_child=True -->
                                 {% include "includes/space_node.html" with space=space %}
                             {% endfor %}
                         </ul>
                     {% else %}
-                        <!-- Empty State -->
                         <div class="text-center p-8 border-2 border-dashed border-gray-300/50 rounded-lg">
                             <p class="text-gray-500 text-sm">No spaces found.</p>
                         </div>
                     {% endif %}
                 </aside>
 
-                <!-- RIGHT PANEL: Content View (2/3 width) -->
                 <section id="content-panel" class="w-full md:w-2/3 p-8 bg-white/40 relative overflow-y-auto max-h-[80vh]">
                     <h3 id="content-title" class="text-2xl font-bold text-gray-900 mb-6">Content</h3>
-                    
-                    <!-- Download Button Container - Now holds multiple buttons in a row -->
                     <div id="download-button-container" class="mb-6 hidden flex flex-wrap gap-4"></div> 
-
-                    <!-- Content Placeholder/Area -->
                     <div id="content-area" class="flex flex-col items-center justify-center h-full text-gray-400 border-2 border-dashed border-gray-300/50 rounded-xl min-h-[400px] p-8">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mb-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                         </svg>
-                        <p>Select a space from the left to view contents</p>
+                        <p>Select a category (Jobs, Solvers, etc.) from the left to view contents</p>
                     </div>
                 </section>
-
             </main>
-
         {% else %}
-            <!-- Logged-Out State -->
             <div class="flex flex-col items-center justify-center min-h-screen w-full">
                 <div class="w-full max-w-md bg-white/80 backdrop-blur-lg rounded-2xl shadow-xl p-10 text-center">
                     <h2 class="text-2xl font-bold text-gray-900 mb-6">Welcome!</h2>
@@ -169,243 +114,259 @@
                 </div>
             </div>
         {% endif %}
+    </div>
 
+    <!-- NEW: Details Modal -->
+    <div id="details-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden flex items-center justify-center z-50 p-4 backdrop-blur-sm transition-opacity duration-300">
+        <div class="bg-white w-full max-w-6xl h-[90vh] rounded-xl shadow-2xl flex flex-col overflow-hidden animate-fade-in relative">
+            <!-- Header -->
+            <div class="bg-gray-100 px-4 py-3 border-b flex items-center justify-between shrink-0">
+                <button onclick="closeModal()" class="flex items-center text-gray-700 hover:text-blue-600 transition-colors font-medium">
+                    <i class="fas fa-arrow-left mr-2"></i> Back
+                </button>
+                <div class="flex space-x-4">
+                     <a id="modal-external-link" href="#" target="_blank" class="text-blue-600 hover:text-blue-800 text-sm flex items-center">
+                        <i class="fas fa-external-link-alt mr-1"></i> Open in New Tab
+                     </a>
+                     <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
+                        <i class="fas fa-times text-lg"></i>
+                     </button>
+                </div>
+            </div>
+            <!-- Content -->
+            <div id="modal-content" class="flex-1 w-full bg-white relative">
+                 <!-- Loader -->
+                 <div class="absolute inset-0 flex items-center justify-center">
+                    <div class="text-center">
+                        <i class="fas fa-circle-notch fa-spin text-4xl text-blue-500 mb-2"></i>
+                        <p class="text-gray-500">Loading details...</p>
+                    </div>
+                 </div>
+            </div>
+        </div>
     </div>
 
 <script>
-    // Variable to track the currently selected node for styling
     let selectedNode = null;
     const contentArea = document.getElementById('content-area');
     const contentTitle = document.getElementById('content-title');
     const downloadButtonContainer = document.getElementById('download-button-container'); 
 
-    function getTableHeaders(title) {
-        if (title === 'Jobs') {
-            return ['Job', 'Status', 'Complete %', 'Running', 'Failed %', 'Date', 'Size'];
-        } else if (title === 'Solvers') {
-            return ['Solver', 'Description', 'Type'];
-        } else if (title === 'Problems') {
-            return ['Benchmark / Problem', 'Type'];
-        } else if (title === 'Users') {
-            // Note: Permissions, Status, Reports, and Developer correspond to the buttons in the aaData
-            return ['User', 'Affiliation', 'Email', 'Permissions', 'Status', 'Reports', 'Developer']; 
-        } else if (title === 'Subfolders') {
-            return ['Subfolder', 'Description'];
+    // --- NEW: Event Delegation for Table Links ---
+    // This intercepts clicks on links inside the content area
+    contentArea.addEventListener('click', function(e) {
+        // Find if the click target or its parent is an anchor tag
+        const link = e.target.closest('a');
+        
+        // If it is a link, and it points to a StarExec secure page (details)
+        if (link && link.href) {
+            const href = link.getAttribute('href');
+            
+            // Check if it matches the StarExec detail pattern
+            // Note: Format is usually /starexec/secure/details/... or similar
+            if (href.startsWith('/starexec/secure/') || href.includes('details')) {
+                e.preventDefault();
+                openModal(href);
+            }
         }
+    });
+
+    function openModal(url) {
+        const modal = document.getElementById('details-modal');
+        const modalContent = document.getElementById('modal-content');
+        const externalLink = document.getElementById('modal-external-link');
+        
+        modal.classList.remove('hidden');
+        externalLink.href = `https://starexec.acorn.miami.edu${url}`;
+        
+        // Reset content to loader
+        modalContent.innerHTML = `
+            <div class="absolute inset-0 flex items-center justify-center">
+                <div class="text-center">
+                    <i class="fas fa-circle-notch fa-spin text-4xl text-blue-500 mb-2"></i>
+                    <p class="text-gray-500">Loading details...</p>
+                </div>
+            </div>
+        `;
+        
+        // Fetch content via our Django proxy to avoid CORS
+        fetch(`/proxy/?target=${encodeURIComponent(url)}`)
+            .then(response => {
+                if (!response.ok) throw new Error("Failed to load content");
+                return response.text();
+            })
+            .then(html => {
+                // Use an iframe to isolate the external HTML/CSS from our app
+                const iframe = document.createElement('iframe');
+                iframe.style.width = '100%';
+                iframe.style.height = '100%';
+                iframe.style.border = 'none';
+                iframe.srcdoc = html;
+                
+                modalContent.innerHTML = '';
+                modalContent.appendChild(iframe);
+            })
+            .catch(err => {
+                modalContent.innerHTML = `
+                    <div class="flex flex-col items-center justify-center h-full text-red-500">
+                        <i class="fas fa-exclamation-circle text-4xl mb-2"></i>
+                        <p>Error loading content: ${err.message}</p>
+                    </div>
+                `;
+            });
+    }
+
+    function closeModal() {
+        document.getElementById('details-modal').classList.add('hidden');
+    }
+
+    // ... existing table functions ...
+    function getTableHeaders(title) {
+        if (title === 'Jobs') return ['Job', 'Status', 'Complete %', 'Running', 'Failed %', 'Date', 'Size'];
+        if (title === 'Solvers') return ['Solver', 'Description', 'Type'];
+        if (title === 'Problems') return ['Benchmark / Problem', 'Type'];
+        if (title === 'Users') return ['User', 'Affiliation', 'Email', 'Permissions', 'Status', 'Reports', 'Developer']; 
+        if (title === 'Subfolders') return ['Subfolder', 'Description'];
         return ['Data'];
     }
 
-
     function formatTable(title, data) {
-        // data.aaData contains the list of records
         const records = data.aaData || [];
         const count = records.length;
         const headers = getTableHeaders(title);
 
         if (count === 0) {
-            // Determine a singular name for better messaging
-            let singularName = title;
+            let singularName = title.endsWith('s') ? title.slice(0, -1) : title;
             if (title === 'Problems') singularName = 'problem';
-            else if (title === 'Users') singularName = 'user';
-            else if (title === 'Subfolders') singularName = 'subfolder';
-            else if (title.endsWith('s')) singularName = title.slice(0, -1);
-            
             return `<div class="mb-4">
                         <h4 class="text-lg font-semibold text-gray-800 border-b pb-1">${title} (0 items)</h4>
-                        <p class="text-gray-500 text-sm mt-1">No ${singularName.toLowerCase()}s found in this space.</p>
+                        <p class="text-gray-500 text-sm mt-1">No ${singularName.toLowerCase()}s found.</p>
                     </div>`;
         }
 
         let tableHtml = `
             <div class="mb-6">
-                <h4 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-2">${title} (${count} total items)</h4>
+                <h4 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-2">${title} (${count})</h4>
                 <div class="overflow-x-auto bg-gray-50 p-3 rounded-lg border border-gray-200">
                     <table class="min-w-full divide-y divide-gray-200 text-xs">
                         <thead class="bg-gray-100">
                             <tr>`;
-                            
-        // Generate Header Row
         headers.forEach(header => {
             tableHtml += `<th class="px-3 py-2 text-left font-medium text-gray-600 uppercase tracking-wider whitespace-nowrap">${header}</th>`;
         });
-        
-        tableHtml += `
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-gray-200">`;
+        tableHtml += `</tr></thead><tbody class="divide-y divide-gray-200">`;
 
-        // Generate Data Rows
         records.forEach((record) => {
-            // record is an array of strings, where each string is the HTML content for a cell
             tableHtml += `<tr class="hover:bg-white transition-colors">`;
-            
             record.forEach(cellContent => {
-                // --- MANDATORY RELATIVE PATH TO ABSOLUTE PATH REPLACEMENT ---
-                // Replace the relative path for the external link icon with the absolute path
-                const absoluteCellContent = cellContent.replace(
-                    'src="/starexec/images/external.png"',
-                    'src="https://starexec.ccs.miami.edu/starexec/images/external.png"'
-                );
-
-                // Insert the modified content
+                const absoluteCellContent = cellContent.replace('src="/starexec/images/external.png"','src="https://starexec.ccs.miami.edu/starexec/images/external.png"');
                 tableHtml += `<td class="px-3 py-2 text-gray-800">${absoluteCellContent}</td>`;
             });
-
             tableHtml += `</tr>`;
         });
 
-        tableHtml += `
-                        </tbody>
-                    </table>
-                </div>
-            </div>`;
+        tableHtml += `</tbody></table></div></div>`;
         return tableHtml;
     }
 
-    // Function to update the right content panel with aggregated data
-    function updateContent(data, spaceId) {
-        contentTitle.textContent = data.title;
+    function updateContent(data, spaceId, requestedType) {
+        const typeLabels = {
+            'jobs': 'Jobs',
+            'solvers': 'Solvers',
+            'benchmarks': 'Problems',
+            'users': 'Users',
+            'subfolders': 'Subfolders',
+            'all': 'Space'
+        };
+        
+        let spaceName = data.title.replace("Space : ", "");
+        const label = typeLabels[requestedType] || 'Content';
+        contentTitle.textContent = `${label} : ${spaceName}`;
+
         contentArea.classList.remove('border-dashed', 'items-center', 'justify-center', 'p-8');
         contentArea.classList.add('p-0');
-
-        // 1. Insert Download Buttons (both ZIP and XML)
         insertDownloadButtons(spaceId, data.title);
 
         let html = '';
-        
-        // New Order: Jobs, Solvers, Problems (Benchmarks), Users, Subfolders
-        html += formatTable('Jobs', data.jobs);
-        html += formatTable('Solvers', data.solvers);
-        html += formatTable('Problems', data.benchmarks); // Uses 'benchmarks' key, displays 'Problems' title
-        html += formatTable('Users', data.users);
-        html += formatTable('Subfolders', data.subfolders);
+        if (requestedType === 'jobs' || requestedType === 'all') html += formatTable('Jobs', data.jobs);
+        if (requestedType === 'solvers' || requestedType === 'all') html += formatTable('Solvers', data.solvers);
+        if (requestedType === 'benchmarks' || requestedType === 'all') html += formatTable('Problems', data.benchmarks);
+        if (requestedType === 'users' || requestedType === 'all') html += formatTable('Users', data.users);
+        if (requestedType === 'subfolders' || requestedType === 'all') html += formatTable('Subfolders', data.subfolders);
+
+        if (html === '') {
+             html = `<div class="text-center p-10 text-gray-400">No content available for this category.</div>`;
+        }
 
         contentArea.innerHTML = `<div class="p-4 sm:p-6 space-y-8 bg-white/70 rounded-xl">${html}</div>`;
     }
 
     function showError(message) {
-        // Hide the download button on error
         downloadButtonContainer.classList.add('hidden'); 
-
         contentTitle.textContent = 'Error';
         contentArea.classList.remove('p-0');
         contentArea.classList.add('border-dashed', 'items-center', 'justify-center', 'p-8');
         contentArea.innerHTML = `
             <div class="flex flex-col items-center justify-center h-full text-red-500 min-h-[400px]">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 <p class="text-center px-4">${message}</p>
-                <p class="text-xs text-gray-500 mt-2">Please check your permissions or network connection.</p>
-            </div>
-        `;
+            </div>`;
     }
 
-    /**
-     * Inserts the dynamic download buttons (ZIP and XML).
-     * @param {string} spaceId - The ID of the space.
-     * @param {string} title - The full title of the space (e.g., "Space : My Project").
-     */
     function insertDownloadButtons(spaceId, title) {
-        // 1. Prepare common variables
         const zipUrlTemplate = "{% url 'download_space_file' space_id=99999 %}";
-        const xmlUrlTemplate = "{% url 'download_space_xml' space_id=99999 %}"; // New URL name
-        
+        const xmlUrlTemplate = "{% url 'download_space_xml' space_id=99999 %}";
         const zipUrl = zipUrlTemplate.replace('99999', spaceId);
         const xmlUrl = xmlUrlTemplate.replace('99999', spaceId);
         
-        // Extract the space name 
         let spaceName = title.replace("Space : ", "");
-        if (spaceName === title) {
-            spaceName = title.length > 30 ? title.substring(0, 30) + '...' : title;
-        }
-
-        // 2. Create the ZIP button element
-        const zipButtonHtml = `
-            <a href="${zipUrl}" 
-               target="_blank" 
-               class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-xl shadow-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-150 ease-in-out transform hover:scale-[1.01] active:scale-95">
-                <i class="fas fa-download mr-2"></i>
-                Download ${spaceName} (ZIP)
-            </a>
-        `;
-
-        // 3. Create the XML button element (New)
-        const xmlButtonHtml = `
-            <a href="${xmlUrl}" 
-               target="_blank" 
-               class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-xl shadow-lg text-blue-600 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-150 ease-in-out transform hover:scale-[1.01] active:scale-95 border border-blue-600">
-                <i class="fas fa-code mr-2"></i>
-                Download ${spaceName} (XML)
-            </a>
-        `;
+        const zipButtonHtml = `<a href="${zipUrl}" target="_blank" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-xl shadow-lg text-white bg-blue-600 hover:bg-blue-700 transition duration-150 transform hover:scale-[1.01]"><i class="fas fa-download mr-2"></i>Download (ZIP)</a>`;
+        const xmlButtonHtml = `<a href="${xmlUrl}" target="_blank" class="inline-flex items-center px-4 py-2 border border-blue-600 text-sm font-medium rounded-xl shadow-lg text-blue-600 bg-white hover:bg-gray-50 transition duration-150 transform hover:scale-[1.01]"><i class="fas fa-code mr-2"></i>Download (XML)</a>`;
         
         downloadButtonContainer.innerHTML = zipButtonHtml + xmlButtonHtml;
         downloadButtonContainer.classList.remove('hidden');
     }
 
     async function loadSpaceContent(form) {
-        // Find the specific button/element that was clicked for styling
         const clickedButton = form.querySelector('.space-node');
-        
-        // 1. Update selection visual state
-        if (selectedNode) {
-            selectedNode.classList.remove('selected-node');
-        }
-        if (clickedButton) {
-             clickedButton.classList.add('selected-node');
-             selectedNode = clickedButton;
+        if (selectedNode) selectedNode.classList.remove('selected-node');
+        if (clickedButton) { 
+            clickedButton.classList.add('selected-node'); 
+            selectedNode = clickedButton; 
         }
 
-        // 2. Clear content area and show a temporary title while fetching
-        contentTitle.textContent = 'Fetching content...';
+        const formData = new FormData(form);
+        const spaceId = formData.get('space_id');
+        const requestedType = formData.get('type') || 'all';
+
+        const typeLabel = requestedType === 'all' ? 'content' : requestedType;
+        contentTitle.textContent = `Fetching ${typeLabel}...`;
         contentArea.innerHTML = '';
         contentArea.classList.add('border-dashed');
         downloadButtonContainer.classList.add('hidden'); 
 
-        // 3. Prepare POST request body (FormData includes CSRF token and space_id)
-        const formData = new FormData(form);
-        const url = form.action;
-        const spaceId = formData.get('space_id'); // Get the ID for the download link
-
-        // 4. Make AJAX request to Django backend
         try {
-            const response = await fetch(url, {
-                method: 'POST',
-                body: formData,
-            });
+            const response = await fetch(form.action, { method: 'POST', body: formData });
+            if (!response.ok) { const err = await response.json(); throw new Error(err.error || 'Request failed'); }
             
-            if (!response.ok) {
-                // Handle HTTP errors returned from the server (e.g., 401, 404, 500)
-                const errorResult = await response.json();
-                throw new Error(errorResult.error || `HTTP Error: ${response.status} ${response.statusText}`);
-            }
-
             const result = await response.json();
             
             if (result.success) {
-                // Pass spaceId and the full title to the updated function
-                updateContent(result.content, spaceId); 
+                updateContent(result.content, spaceId, requestedType);
             } else {
-                showError(`Backend Error: ${result.error || 'Unknown issue'}`);
+                showError(result.error || 'Unknown issue');
             }
-
-        } catch (error) {
-            console.error('Fetch error:', error);
-            showError(`${error.message}`);
-        }
+        } catch (error) { showError(error.message); }
     }
 
-    // Attach listener to intercept all space-node forms
     document.addEventListener('DOMContentLoaded', () => {
-        document.querySelectorAll('.space-node-form').forEach(form => {
-            form.addEventListener('submit', function(e) {
-                e.preventDefault(); // Stop the default browser form submission (page reload)
-                loadSpaceContent(this); // Pass the form element to the AJAX handler
-            });
+        document.addEventListener('submit', function(e) {
+            if (e.target.classList.contains('space-node-form')) {
+                e.preventDefault();
+                loadSpaceContent(e.target);
+            }
         });
     });
 </script>
-
 </body>
 </html>

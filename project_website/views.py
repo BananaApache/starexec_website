@@ -1,4 +1,3 @@
-
 import requests
 from django.shortcuts import render, redirect
 from django.contrib.auth import login, logout
@@ -6,11 +5,10 @@ from django.contrib.auth.models import User
 from django.contrib.auth.decorators import login_required
 from bs4 import BeautifulSoup as bs
 import json
-from django.http import JsonResponse, StreamingHttpResponse 
+from django.http import JsonResponse, StreamingHttpResponse, HttpResponse
 import re
 
 # Create your views here.
-
 
 def get_space_xml_response(api_cookies, space_id):
     space_id = int(space_id)
@@ -42,7 +40,6 @@ def get_space_xml_response(api_cookies, space_id):
         print(f"An unexpected request error occurred: {e}. XML Download failed.")
         return None
 
-
 def get_space_download_response(api_cookies, space_id):
     space_id = int(space_id)
     url = f"https://starexec.acorn.miami.edu/starexec/secure/download"
@@ -72,7 +69,6 @@ def get_space_download_response(api_cookies, space_id):
     except requests.exceptions.RequestException as e:
         print(f"An unexpected request error occurred: {e}. Download failed.")
         return None
-
 
 @login_required
 def download_space_file(request, space_id):
@@ -109,12 +105,8 @@ def download_space_file(request, space_id):
     
     return django_response
 
-
 @login_required
 def download_space_xml_file(request, space_id):
-    """
-    Downloads the Space XML file from StarExec by streaming the response.
-    """
     jsessionid = request.session.get('JSESSIONID') 
 
     if not jsessionid:
@@ -149,77 +141,41 @@ def download_space_xml_file(request, space_id):
     
     return django_response
 
-
 def get_jobs(api_cookies, space_id):
-    data = {
-        'sEcho': '5',
-        'iDisplayStart': '0',
-        'iDisplayLength': '100',
-        'iSortCol_0': '0',
-    }
-    
+    data = {'sEcho': '5', 'iDisplayStart': '0', 'iDisplayLength': '100', 'iSortCol_0': '0'}
     response = requests.post(f"https://starexec.acorn.miami.edu/starexec/services/space/{space_id}/jobs/pagination", cookies=api_cookies, data=data)
-    
     return response.json()
-
 
 def get_solvers(api_cookies, space_id):
-    data = {
-        'sEcho': '5',
-        'iDisplayStart': '0',
-        'iDisplayLength': '100',
-        'iSortCol_0': '0',
-    }
-    
+    data = {'sEcho': '5', 'iDisplayStart': '0', 'iDisplayLength': '100', 'iSortCol_0': '0'}
     response = requests.post(f"https://starexec.acorn.miami.edu/starexec/services/space/{space_id}/solvers/pagination", cookies=api_cookies, data=data)
-    
     return response.json()
-
 
 def get_benchmarks(api_cookies, space_id):
-    data = {
-        'sEcho': '5',
-        'iDisplayStart': '0',
-        'iDisplayLength': '100',
-        'iSortCol_0': '0',
-    }
-    
+    data = {'sEcho': '5', 'iDisplayStart': '0', 'iDisplayLength': '100', 'iSortCol_0': '0'}
     response = requests.post(f"https://starexec.acorn.miami.edu/starexec/services/space/{space_id}/benchmarks/pagination", cookies=api_cookies, data=data)
-    
     return response.json()
-
 
 def get_users(api_cookies, space_id):
-    data = {
-        'sEcho': '5',
-        'iDisplayStart': '0',
-        'iDisplayLength': '100',
-        'iSortCol_0': '0',
-    }
-    
+    data = {'sEcho': '5', 'iDisplayStart': '0', 'iDisplayLength': '100', 'iSortCol_0': '0'}
     response = requests.post(f"https://starexec.acorn.miami.edu/starexec/services/space/{space_id}/users/pagination", cookies=api_cookies, data=data)
-    
     return response.json()
-
 
 def get_subfolder(api_cookies, space_id):
-    data = {
-        'sEcho': '5',
-        'iDisplayStart': '0',
-        'iDisplayLength': '100',
-        'iSortCol_0': '0',
-    }
-    
+    data = {'sEcho': '5', 'iDisplayStart': '0', 'iDisplayLength': '100', 'iSortCol_0': '0'}
     response = requests.post(f"https://starexec.acorn.miami.edu/starexec/services/space/{space_id}/spaces/pagination", cookies=api_cookies, data=data)
-    
     return response.json()
-
 
 @login_required
 def get_space_content(request):
+    """
+    Enhanced to handle specific category clicks (type: jobs, solvers, etc.)
+    """
     if request.method == 'POST':
         space_id = request.POST.get('space_id')
         space_name = request.POST.get('space_name')
+        # CAPTURE THE REQUESTED TYPE
+        requested_type = request.POST.get('type', 'all') 
         jsessionid = request.session.get('JSESSIONID')
 
         if not space_id or not jsessionid:
@@ -227,23 +183,30 @@ def get_space_content(request):
 
         api_cookies = {'JSESSIONID': jsessionid}
         
-        jobs = get_jobs(api_cookies, space_id)
-        solvers = get_solvers(api_cookies, space_id)
-        benchmarks = get_benchmarks(api_cookies, space_id)
-        users = get_users(api_cookies, space_id)
-        subfolders = get_subfolder(api_cookies, space_id)
+        # Initialize results dictionary
+        results = {
+            'title': f'Space : {space_name}'
+        }
 
+        # ONLY FETCH WHAT IS REQUESTED to optimize performance
         try:
-            results = {
-                'jobs': jobs,
-                'solvers': solvers,
-                'benchmarks': benchmarks,
-                'users': users,
-                'subfolders': subfolders,
-                'title': f'Space : {space_name}'
-            }
+            if requested_type == 'all' or requested_type == 'jobs':
+                results['jobs'] = get_jobs(api_cookies, space_id)
             
-            return JsonResponse({'success': True, 'content': results})
+            if requested_type == 'all' or requested_type == 'solvers':
+                results['solvers'] = get_solvers(api_cookies, space_id)
+                
+            if requested_type == 'all' or requested_type == 'benchmarks':
+                results['benchmarks'] = get_benchmarks(api_cookies, space_id)
+                
+            if requested_type == 'all' or requested_type == 'users':
+                results['users'] = get_users(api_cookies, space_id)
+                
+            if requested_type == 'all' or requested_type == 'subfolders':
+                results['subfolders'] = get_subfolder(api_cookies, space_id)
+
+            # Return the requested_type so frontend knows what to render
+            return JsonResponse({'success': True, 'content': results, 'requested_type': requested_type})
 
         except requests.exceptions.HTTPError as e:
             error_message = f'API HTTP Error: {e.response.status_code} {e.response.reason}. You might not have permission.'
@@ -257,7 +220,6 @@ def get_space_content(request):
 
     # Fallback for non-POST requests
     return JsonResponse({'error': 'Invalid request method'}, status=405)
-
 
 def build_space_tree(api_cookies, space_id=-1, level=0, parent_name=''):
     params = {
@@ -289,10 +251,8 @@ def build_space_tree(api_cookies, space_id=-1, level=0, parent_name=''):
         
     return subspaces
 
-
 @login_required
 def home(request):
-    
     jsessionid = request.session.get('JSESSIONID') 
 
     if not jsessionid:
@@ -303,7 +263,6 @@ def home(request):
     
     try:
         space_tree = build_space_tree(api_cookies)
-        # print(space_tree)
         
         context = {
             'spaces_tree': space_tree
@@ -318,46 +277,28 @@ def home(request):
     except (KeyError, IndexError, TypeError) as e:
         return render(request, 'home.html', {'error': f'Error processing API response: {e}'})
 
-
 def login_view(request):
     if request.method == "POST":
-
         try:
             api_session = requests.Session() 
-            
             api_response = api_session.get("https://starexec.acorn.miami.edu/starexec/secure/index.jsp")
             jsessionid = api_response.cookies.get('JSESSIONID')
-         
-            headers = {
-                'Content-Type': 'application/x-www-form-urlencoded'
-            }
+            headers = {'Content-Type': 'application/x-www-form-urlencoded'}
             
             username_from_form = request.POST.get('email')
             password_from_form = request.POST.get('password')
-                        
-            data = {
-                'j_username': username_from_form,
-                'j_password': password_from_form,
-                'cookieexists': 'false'
-            }
+            data = {'j_username': username_from_form, 'j_password': password_from_form, 'cookieexists': 'false'}
             
-            api_response = api_session.post("https://starexec.acorn.miami.edu/starexec/secure/j_security_check",
-                                            headers=headers,
-                                            data=data
-                                           )
+            api_response = api_session.post("https://starexec.acorn.miami.edu/starexec/secure/j_security_check", headers=headers, data=data)
             
-            # print(api_response.status_code)
             soup = bs(api_response.text, 'html.parser')
-            # print("USERNAME:", soup.select_one("footer").select_one("a").text)
             
             if soup.select_one("footer").select_one("a").text.strip() != "Login":
                 jsession_cookie_value = api_session.cookies.get('JSESSIONID')
-
                 if jsession_cookie_value:
                     request.session['JSESSIONID'] = jsession_cookie_value
                 else:
-                    context = {'error': 'Login succeeded but failed to retrieve session.'}
-                    return render(request, 'login.html', context)
+                    return render(request, 'login.html', {'error': 'Login succeeded but failed to retrieve session.'})
 
                 local_user, created = User.objects.get_or_create(username=username_from_form)
                 if created:
@@ -366,23 +307,66 @@ def login_view(request):
                 
                 local_user.backend = 'django.contrib.auth.backends.ModelBackend'
                 login(request, local_user)
-
                 return redirect('/home')
-
             else:
-                print("Login failed.")
                 return render(request, 'login.html', {'error': 'Invalid username or password.'})
 
         except Exception as e:
-            print("Exception during login:", str(e))
-            context = {'error': 'The login service is temporarily unavailable.'}
-            return render(request, 'login.html', context)
+            return render(request, 'login.html', {'error': 'The login service is temporarily unavailable.'})
     
     return render(request, 'login.html')
 
-
 def logout_view(request):
     logout(request)
-    
     return redirect('/home')
 
+# ---------------------------------------------------------
+# NEW: Proxy View to fetch StarExec details pages
+# ---------------------------------------------------------
+@login_required
+def proxy_starexec_page(request):
+    """
+    Proxies GET requests to StarExec to bypass CORS and allow embedding in a modal.
+    Rewrites relative URLs to absolute so images/CSS work.
+    """
+    target_path = request.GET.get('target')
+    
+    if not target_path:
+        return HttpResponse("No target URL provided", status=400)
+    
+    # Security check: ensure we are only proxying to StarExec
+    if not target_path.startswith('/starexec/'):
+         return HttpResponse("Invalid target path", status=400)
+
+    jsessionid = request.session.get('JSESSIONID')
+    if not jsessionid:
+        return HttpResponse("Unauthorized", status=401)
+        
+    url = f"https://starexec.acorn.miami.edu{target_path}"
+    
+    try:
+        # Fetch the page using the user's session
+        resp = requests.get(url, cookies={'JSESSIONID': jsessionid}, timeout=15)
+        
+        if resp.status_code != 200:
+            return HttpResponse(f"Error fetching page: {resp.status_code}", status=resp.status_code)
+            
+        content = resp.text
+        
+        # --- HTML Rewriting for Assets ---
+        # StarExec uses relative paths for images, css, js. We need to point them to the absolute URL.
+        base_url = "https://starexec.acorn.miami.edu"
+        
+        # Rewrite src="/..." -> src="https://starexec.../..."
+        content = content.replace('src="/', f'src="{base_url}/')
+        content = content.replace("src='/", f"src='{base_url}/")
+        
+        # Rewrite href="/..." -> href="https://starexec.../..." (for CSS links)
+        content = content.replace('href="/', f'href="{base_url}/')
+        content = content.replace("href='/", f"href='{base_url}/")
+        
+        # Return the modified HTML
+        return HttpResponse(content)
+        
+    except Exception as e:
+        return HttpResponse(f"Proxy error: {str(e)}", status=500)

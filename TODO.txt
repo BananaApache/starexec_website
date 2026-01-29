@@ -1,6 +1,0 @@
-
- - use `if (window.event.ctrlKey)` to detect if user is command or ctrl clicking a tab
-
- - detect admin
-
- - move "add subspace" to subspace actions

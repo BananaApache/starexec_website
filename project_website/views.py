@@ -3,17 +3,33 @@ from django.shortcuts import render, redirect
 from django.contrib.auth import login, logout
 from django.contrib.auth.models import User
 from django.contrib.auth.decorators import login_required
+from django.conf import settings
 from bs4 import BeautifulSoup as bs
 import json
 from django.http import JsonResponse, StreamingHttpResponse, HttpResponse
 import re
 
+STAREXEC_URL = settings.STAREXEC_URL
+
 # Create your views here.
 
 
-def get_space_xml_response(api_cookies, space_id):
+def _normalize_starexec_url(url):
+    url = url.strip().rstrip("/")
+    if url and "://" not in url:
+        url = "https://" + url
+    return url
+
+
+def _get_starexec_url(request):
+    return request.session.get("STAREXEC_URL", STAREXEC_URL)
+
+
+def get_space_xml_response(api_cookies, space_id, starexec_url=None):
+    if starexec_url is None:
+        starexec_url = STAREXEC_URL
     space_id = int(space_id)
-    url = "https://starexec.acorn.miami.edu/starexec/secure/download"
+    url = f"{starexec_url}/starexec/secure/download"
 
     parameters = {
         "type": "spaceXML",
@@ -44,9 +60,11 @@ def get_space_xml_response(api_cookies, space_id):
         return None
 
 
-def get_space_download_response(api_cookies, space_id):
+def get_space_download_response(api_cookies, space_id, starexec_url=None):
+    if starexec_url is None:
+        starexec_url = STAREXEC_URL
     space_id = int(space_id)
-    url = "https://starexec.acorn.miami.edu/starexec/secure/download"
+    url = f"{starexec_url}/starexec/secure/download"
 
     parameters = {
         "type": "space",
@@ -85,8 +103,9 @@ def download_space_file(request, space_id):
         return redirect("login")
 
     api_cookies = {"JSESSIONID": jsessionid}
+    starexec_url = _get_starexec_url(request)
 
-    response = get_space_download_response(api_cookies, space_id)
+    response = get_space_download_response(api_cookies, space_id, starexec_url)
 
     if response is None:
         return render(
@@ -126,8 +145,9 @@ def download_space_xml_file(request, space_id):
         return redirect("login")
 
     api_cookies = {"JSESSIONID": jsessionid}
+    starexec_url = _get_starexec_url(request)
 
-    response = get_space_xml_response(api_cookies, space_id)
+    response = get_space_xml_response(api_cookies, space_id, starexec_url)
 
     if response is None:
         return render(
@@ -160,7 +180,9 @@ def download_space_xml_file(request, space_id):
     return django_response
 
 
-def get_jobs(api_cookies, space_id):
+def get_jobs(api_cookies, space_id, starexec_url=None):
+    if starexec_url is None:
+        starexec_url = STAREXEC_URL
     data = {
         "sEcho": "5",
         "iDisplayStart": "0",
@@ -168,14 +190,16 @@ def get_jobs(api_cookies, space_id):
         "iSortCol_0": "0",
     }
     response = requests.post(
-        f"https://starexec.acorn.miami.edu/starexec/services/space/{space_id}/jobs/pagination",
+        f"{starexec_url}/starexec/services/space/{space_id}/jobs/pagination",
         cookies=api_cookies,
         data=data,
     )
     return response.json()
 
 
-def get_solvers(api_cookies, space_id):
+def get_solvers(api_cookies, space_id, starexec_url=None):
+    if starexec_url is None:
+        starexec_url = STAREXEC_URL
     data = {
         "sEcho": "5",
         "iDisplayStart": "0",
@@ -183,14 +207,16 @@ def get_solvers(api_cookies, space_id):
         "iSortCol_0": "0",
     }
     response = requests.post(
-        f"https://starexec.acorn.miami.edu/starexec/services/space/{space_id}/solvers/pagination",
+        f"{starexec_url}/starexec/services/space/{space_id}/solvers/pagination",
         cookies=api_cookies,
         data=data,
     )
     return response.json()
 
 
-def get_benchmarks(api_cookies, space_id):
+def get_benchmarks(api_cookies, space_id, starexec_url=None):
+    if starexec_url is None:
+        starexec_url = STAREXEC_URL
     data = {
         "sEcho": "5",
         "iDisplayStart": "0",
@@ -198,14 +224,16 @@ def get_benchmarks(api_cookies, space_id):
         "iSortCol_0": "0",
     }
     response = requests.post(
-        f"https://starexec.acorn.miami.edu/starexec/services/space/{space_id}/benchmarks/pagination",
+        f"{starexec_url}/starexec/services/space/{space_id}/benchmarks/pagination",
         cookies=api_cookies,
         data=data,
     )
     return response.json()
 
 
-def get_users(api_cookies, space_id):
+def get_users(api_cookies, space_id, starexec_url=None):
+    if starexec_url is None:
+        starexec_url = STAREXEC_URL
     data = {
         "sEcho": "5",
         "iDisplayStart": "0",
@@ -213,14 +241,16 @@ def get_users(api_cookies, space_id):
         "iSortCol_0": "0",
     }
     response = requests.post(
-        f"https://starexec.acorn.miami.edu/starexec/services/space/{space_id}/users/pagination",
+        f"{starexec_url}/starexec/services/space/{space_id}/users/pagination",
         cookies=api_cookies,
         data=data,
     )
     return response.json()
 
 
-def get_subfolder(api_cookies, space_id):
+def get_subfolder(api_cookies, space_id, starexec_url=None):
+    if starexec_url is None:
+        starexec_url = STAREXEC_URL
     data = {
         "sEcho": "5",
         "iDisplayStart": "0",
@@ -228,7 +258,7 @@ def get_subfolder(api_cookies, space_id):
         "iSortCol_0": "0",
     }
     response = requests.post(
-        f"https://starexec.acorn.miami.edu/starexec/services/space/{space_id}/spaces/pagination",
+        f"{starexec_url}/starexec/services/space/{space_id}/spaces/pagination",
         cookies=api_cookies,
         data=data,
     )
@@ -254,6 +284,7 @@ def get_space_content(request):
             )
 
         api_cookies = {"JSESSIONID": jsessionid}
+        starexec_url = _get_starexec_url(request)
 
         # Initialize results dictionary
         results = {"title": f"Space : {space_name}"}
@@ -261,19 +292,19 @@ def get_space_content(request):
         # ONLY FETCH WHAT IS REQUESTED to optimize performance
         try:
             if requested_type == "all" or requested_type == "jobs":
-                results["jobs"] = get_jobs(api_cookies, space_id)
+                results["jobs"] = get_jobs(api_cookies, space_id, starexec_url)
 
             if requested_type == "all" or requested_type == "solvers":
-                results["solvers"] = get_solvers(api_cookies, space_id)
+                results["solvers"] = get_solvers(api_cookies, space_id, starexec_url)
 
             if requested_type == "all" or requested_type == "benchmarks":
-                results["benchmarks"] = get_benchmarks(api_cookies, space_id)
+                results["benchmarks"] = get_benchmarks(api_cookies, space_id, starexec_url)
 
             if requested_type == "all" or requested_type == "users":
-                results["users"] = get_users(api_cookies, space_id)
+                results["users"] = get_users(api_cookies, space_id, starexec_url)
 
             if requested_type == "all" or requested_type == "subfolders":
-                results["subfolders"] = get_subfolder(api_cookies, space_id)
+                results["subfolders"] = get_subfolder(api_cookies, space_id, starexec_url)
 
             # Return the requested_type so frontend knows what to render
             return JsonResponse(
@@ -294,14 +325,16 @@ def get_space_content(request):
     return JsonResponse({"error": "Invalid request method"}, status=405)
 
 
-def build_space_tree(api_cookies, space_id=-1, level=0, parent_name=""):
+def build_space_tree(api_cookies, space_id=-1, level=0, parent_name="", starexec_url=None):
+    if starexec_url is None:
+        starexec_url = STAREXEC_URL
     params = {
         "id": space_id,
     }
 
     try:
         response = requests.get(
-            "https://starexec.acorn.miami.edu/starexec/services/space/subspaces",
+            f"{starexec_url}/starexec/services/space/subspaces",
             cookies=api_cookies,
             params=params,
         )
@@ -320,7 +353,7 @@ def build_space_tree(api_cookies, space_id=-1, level=0, parent_name=""):
         current_data_name = subspace.get("data", "")
 
         subspace["children"] = build_space_tree(
-            api_cookies, current_id, level + 1, current_data_name
+            api_cookies, current_id, level + 1, current_data_name, starexec_url
         )
 
     if space_id == -1 and subspaces and len(subspaces) > 0:
@@ -340,11 +373,12 @@ def home(request):
         return redirect("login")
 
     api_cookies = {"JSESSIONID": jsessionid}
+    starexec_url = _get_starexec_url(request)
 
     try:
-        space_tree = build_space_tree(api_cookies)
+        space_tree = build_space_tree(api_cookies, starexec_url=starexec_url)
 
-        context = {"spaces_tree": space_tree}
+        context = {"spaces_tree": space_tree, "starexec_url": starexec_url}
 
         return render(request, "home.html", context)
 
@@ -365,9 +399,13 @@ def home(request):
 def login_view(request):
     if request.method == "POST":
         try:
+            starexec_url = _normalize_starexec_url(
+                request.POST.get("starexec_url", "") or STAREXEC_URL
+            )
+
             api_session = requests.Session()
             api_response = api_session.get(
-                "https://starexec.acorn.miami.edu/starexec/secure/index.jsp"
+                f"{starexec_url}/starexec/secure/index.jsp"
             )
             # jsessionid = api_response.cookies.get('JSESSIONID')
             headers = {"Content-Type": "application/x-www-form-urlencoded"}
@@ -381,7 +419,7 @@ def login_view(request):
             }
 
             api_response = api_session.post(
-                "https://starexec.acorn.miami.edu/starexec/secure/j_security_check",
+                f"{starexec_url}/starexec/secure/j_security_check",
                 headers=headers,
                 data=data,
             )
@@ -392,11 +430,15 @@ def login_view(request):
                 jsession_cookie_value = api_session.cookies.get("JSESSIONID")
                 if jsession_cookie_value:
                     request.session["JSESSIONID"] = jsession_cookie_value
+                    request.session["STAREXEC_URL"] = starexec_url
                 else:
                     return render(
                         request,
                         "login.html",
-                        {"error": "Login succeeded but failed to retrieve session."},
+                        {
+                            "error": "Login succeeded but failed to retrieve session.",
+                            "default_starexec_url": starexec_url,
+                        },
                     )
 
                 local_user, created = User.objects.get_or_create(
@@ -411,7 +453,12 @@ def login_view(request):
                 return redirect("/home")
             else:
                 return render(
-                    request, "login.html", {"error": "Invalid username or password."}
+                    request,
+                    "login.html",
+                    {
+                        "error": "Invalid username or password.",
+                        "default_starexec_url": starexec_url,
+                    },
                 )
 
         except Exception:
@@ -421,7 +468,7 @@ def login_view(request):
                 {"error": "The login service is temporarily unavailable."},
             )
 
-    return render(request, "login.html")
+    return render(request, "login.html", {"default_starexec_url": STAREXEC_URL})
 
 
 def logout_view(request):
@@ -451,7 +498,8 @@ def proxy_starexec_page(request):
     if not jsessionid:
         return HttpResponse("Unauthorized", status=401)
 
-    url = f"https://starexec.acorn.miami.edu{target_path}"
+    starexec_url = _get_starexec_url(request)
+    url = f"{starexec_url}{target_path}"
 
     try:
         # Fetch the page using the user's session
@@ -466,7 +514,7 @@ def proxy_starexec_page(request):
 
         # --- HTML Rewriting for Assets ---
         # StarExec uses relative paths for images, css, js. We need to point them to the absolute URL.
-        base_url = "https://starexec.acorn.miami.edu"
+        base_url = starexec_url
 
         # Rewrite src="/..." -> src="https://starexec.../..."
         content = content.replace('src="/', f'src="{base_url}/')

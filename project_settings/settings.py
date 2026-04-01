@@ -138,3 +138,5 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
 CSRF_TRUSTED_ORIGINS = env("CSRF_TRUSTED_ORIGINS")
+
+STAREXEC_URL = env("STAREXEC_URL", default="https://starexec.acorn.miami.edu").rstrip("/")

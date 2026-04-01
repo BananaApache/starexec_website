@@ -177,7 +177,7 @@
         const externalLink = document.getElementById('modal-external-link');
         
         modal.classList.remove('hidden');
-        externalLink.href = `https://starexec.acorn.miami.edu${url}`;
+        externalLink.href = `{{ starexec_url }}${url}`;
         
         // Reset content to loader
         modalContent.innerHTML = `
@@ -259,7 +259,7 @@
         records.forEach((record) => {
             tableHtml += `<tr class="hover:bg-white transition-colors">`;
             record.forEach(cellContent => {
-                const absoluteCellContent = cellContent.replace('src="/starexec/images/external.png"','src="https://starexec.ccs.miami.edu/starexec/images/external.png"');
+                const absoluteCellContent = cellContent.replace(/<img[^>]*src="\/starexec\/images\/external\.png"[^>]*>/g, ' <i class="fas fa-arrow-up-right-from-square text-blue-400 text-xs"></i>');
                 tableHtml += `<td class="px-3 py-2 text-gray-800">${absoluteCellContent}</td>`;
             });
             tableHtml += `</tr>`;

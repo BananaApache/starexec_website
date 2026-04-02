@@ -716,6 +716,32 @@
         downloadButtonContainer.classList.remove('hidden');
     }
 
+    // Returns the .space-node-form whose space_id + type match the given values,
+    // or null if the space isn't present in the rendered tree.
+    function findSpaceForm(spaceId, type) {
+        for (const form of document.querySelectorAll('.space-node-form')) {
+            const sid = form.querySelector('input[name="space_id"]')?.value;
+            const t   = form.querySelector('input[name="type"]')?.value;
+            if (sid === String(spaceId) && t === String(type)) return form;
+        }
+        return null;
+    }
+
+    // Opens every ancestor <details> element of `element` so the node is visible
+    // in the tree, and saves the newly-opened IDs to localStorage in one write.
+    function expandAncestors(element) {
+        const ids = getTreeState();
+        let el = element.parentElement;
+        while (el) {
+            if (el.tagName === 'DETAILS') {
+                el.open = true;
+                if (el.dataset.treeId) ids.add(el.dataset.treeId);
+            }
+            el = el.parentElement;
+        }
+        saveTreeState(ids);
+    }
+
     async function loadSpaceContent(form) {
         lastActiveForm = form;
         const clickedButton = form.querySelector('.space-node');
@@ -728,6 +754,9 @@
         const formData = new FormData(form);
         const spaceId = formData.get('space_id');
         const requestedType = formData.get('type') || 'all';
+
+        // Persist selection in the URL so a page reload restores the same view.
+        history.replaceState({}, '', `?space_id=${spaceId}&type=${requestedType}`);
 
         const typeLabel = requestedType === 'all' ? 'content' : requestedType;
         contentTitle.textContent = `Fetching ${typeLabel}...`;
@@ -792,6 +821,19 @@
             document.querySelectorAll('[data-tree-id]').forEach(el => {
                 if (expandedIds.has(el.dataset.treeId)) el.open = true;
             });
+        }
+
+        // Restore the active space content from URL params (deep-link / reload persistence).
+        // Uses the existing AJAX path — no backend change required.
+        const params     = new URLSearchParams(window.location.search);
+        const urlSpaceId = params.get('space_id');
+        const urlType    = params.get('type');
+        if (urlSpaceId && urlType) {
+            const form = findSpaceForm(urlSpaceId, urlType);
+            if (form) {
+                expandAncestors(form);   // ensure the node is visible in the tree
+                loadSpaceContent(form);
+            }
         }
 
         // --- Lazy-load event delegation for Job Pair accordion rows ---

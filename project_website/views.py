@@ -536,20 +536,20 @@ def proxy_starexec_page(request):
 @login_required
 def job_detail(request, job_id):
     """
-    Renders a StarExec job detail page standalone (same content as the modal,
-    but as a full browser tab). Reached via Cmd/Ctrl+Click on a job link.
+    Standalone full-page view for a single job — same JSON-backed card UI as
+    the modal, rendered as a dedicated page for Cmd/Ctrl+Click new-tab navigation.
+    All data fetching is handled by the template's JS via /jobs/<id>/json/ and
+    /api/proxy/ — this view only provides the shell and injects job_id / starexec_url.
     """
     jsessionid = request.session.get("JSESSIONID")
     if not jsessionid:
         return redirect("login")
 
     starexec_url = _get_starexec_url(request)
-    path = f"/starexec/secure/details/job.jsp?id={job_id}"
-    content, err = _fetch_starexec_html(jsessionid, starexec_url, path)
-
-    if err:
-        return HttpResponse(f"Error loading job {job_id}: {content}", status=err)
-    return HttpResponse(content)
+    return render(request, "job_detail.html", {
+        "job_id": job_id,
+        "starexec_url": starexec_url,
+    })
 
 
 @login_required

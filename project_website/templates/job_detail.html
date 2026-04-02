@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job {{ job_id }} — StarExec</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/x-icon" href="https://starexec.ccs.miami.edu/starexec/images/favicon.ico" />
+    <script src="https://kit.fontawesome.com/65a259d37d.js" crossorigin="anonymous"></script>
+    <style>
+        body {
+            background: -webkit-radial-gradient(35.49% -18.37%, 55.87% 55.87%, #d1aad7 0%, rgba(255, 255, 255, 0) 100%),
+                        -webkit-radial-gradient(-24.53% -16.02%, 70.81% 48.44%, #c88bc4 0%, rgba(255, 255, 255, 0) 100%),
+                        -webkit-radial-gradient(104.86% -43.36%, 91.61% 92.58%, #7b8fdd 0%, rgba(255, 255, 255, 0) 100%),
+                        -webkit-radial-gradient(-2.99% -8.69%, 50.59% 55.55%, #86bff2 9.06%, rgba(255, 255, 255, 0) 100%),
+                        #f7fafc;
+            background-attachment: fixed;
+            font-family: 'Inter', sans-serif;
+        }
+        .arrow-icon { transition: transform 0.2s ease; }
+    </style>
+</head>
+<body class="antialiased text-gray-800 min-h-screen">
+
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 py-8">
+
+        <!-- Top nav -->
+        <nav class="flex items-center justify-between mb-6">
+            <a href="{% url 'home' %}"
+               class="flex items-center text-sm font-medium text-gray-700 bg-white/70 backdrop-blur-sm py-2 px-4 rounded-lg shadow-sm hover:text-blue-600 hover:shadow-md transition-all">
+                <i class="fas fa-arrow-left mr-2"></i> Dashboard
+            </a>
+        </nav>
+
+        <!-- Main card -->
+        <div class="bg-white/80 backdrop-blur-lg rounded-2xl shadow-xl overflow-hidden">
+
+            <!-- Card header -->
+            <div class="px-6 py-4 border-b border-gray-200/60 bg-gray-50/50 shrink-0">
+                <div class="flex items-center gap-3">
+                    <h1 id="job-title" class="text-lg font-bold text-gray-900">
+                        <span class="text-gray-400 font-normal">Job</span> {{ job_id }}
+                    </h1>
+                </div>
+            </div>
+
+            <!-- Content — JS replaces this with stat grid + pairs accordion -->
+            <div id="job-content" class="p-6 sm:p-8">
+                <div class="flex items-center justify-center py-16 text-gray-400">
+                    <i class="fas fa-circle-notch fa-spin text-2xl mr-3 text-blue-400"></i>
+                    <span>Loading job details...</span>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+<script>
+    const JOB_ID       = {{ job_id }};
+    const STAREXEC_URL = "{{ starexec_url }}";
+
+    const _pairDataCache = new Map();  // spaceId → resolved rows
+    const _pairInflight  = new Map();  // spaceId → in-flight Promise
+
+    // ---- Shared helpers (mirrors home.html) ----
+
+    function _csrfToken() {
+        const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+        return match ? match[1] : '';
+    }
+
+    function _esc(str) {
+        return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function _statCard(label, value) {
+        return `<div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                    <dt class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">${label}</dt>
+                    <dd class="text-sm font-medium text-gray-800">${value}</dd>
+                </div>`;
+    }
+
+    function _stage(job) { return job.stageAttributes?.[0] ?? {}; }
+
+    function _formatJobDate(ts) {
+        if (!ts) return 'none';
+        const d = new Date(ts);
+        const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const day  = String(d.getDate()).padStart(2, '0');
+        let   hr   = d.getHours();
+        const ampm = hr >= 12 ? 'PM' : 'AM';
+        hr = hr % 12 || 12;
+        const mm   = String(d.getMinutes()).padStart(2, '0');
+        const ss   = String(d.getSeconds()).padStart(2, '0');
+        return `${MON[d.getMonth()]} ${day} ${d.getFullYear()} ${String(hr).padStart(2,'0')}:${mm}:${ss} ${ampm}`;
+    }
+
+    function _jobStatus(job) {
+        if (job.deleted) return 'Deleted';
+        if (job.paused)  return 'Paused';
+        return 'Incomplete';
+    }
+
+    // Single StarExec services request via the thin Django proxy.
+    // POST requests carry no timeout — pagination can be slow.
+    async function _apiFetch(path, options = {}) {
+        const headers = options.method === 'POST'
+            ? { 'X-CSRFToken': _csrfToken() }
+            : {};
+        const r = await fetch(
+            `/api/proxy/?target=${encodeURIComponent(path)}`,
+            { ...options, headers }
+        );
+        if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            throw new Error(d.error || `HTTP ${r.status}`);
+        }
+        return r.json();
+    }
+
+    // Tier 1: fetch the flat list of spaces for a job (steps 1 + 2 of waterfall).
+    async function _fetchJobSpaces(jobId) {
+        function _sid(node) { return node?.id ?? node?.attr?.id ?? null; }
+
+        const jobspaces = await _apiFetch(
+            `/starexec/services/space/${jobId}/jobspaces/false`
+        );
+        if (!Array.isArray(jobspaces) || !jobspaces.length) return [];
+
+        const rootId = _sid(jobspaces[0]);
+        if (!rootId) return [];
+
+        const children = await _apiFetch(
+            `/starexec/services/space/${jobId}/jobspaces/false?id=${rootId}`
+        );
+        const raw = (Array.isArray(children) && children.length) ? children : [jobspaces[0]];
+
+        return raw
+            .map(s => ({ spaceId: _sid(s), spaceName: s?.data ?? s?.name ?? '?' }))
+            .filter(s => s.spaceId);
+    }
+
+    // Tier 2: fetch pairs for one space, with cache + in-flight deduplication.
+    function _fetchSpacePairs(spaceId) {
+        if (_pairDataCache.has(spaceId)) return Promise.resolve(_pairDataCache.get(spaceId));
+        if (_pairInflight.has(spaceId))  return _pairInflight.get(spaceId);
+
+        const body = new URLSearchParams({
+            sEcho: '1', iDisplayStart: '0', iDisplayLength: '200', iSortCol_0: '0',
+        });
+        const promise = _apiFetch(
+            `/starexec/services/jobs/solvers/pagination/${spaceId}/true/true/1/false`,
+            { method: 'POST', body }
+        ).then(data => {
+            const rows = data?.aaData ?? [];
+            _pairDataCache.set(spaceId, rows);
+            _pairInflight.delete(spaceId);
+            return rows;
+        }).catch(err => {
+            _pairInflight.delete(spaceId);
+            throw err;
+        });
+
+        _pairInflight.set(spaceId, promise);
+        return promise;
+    }
+
+    function _renderSpacesList(spaces) {
+        if (!spaces.length) {
+            return '<p class="text-gray-400 text-sm py-2 italic">No job pairs found.</p>';
+        }
+        return spaces.map(({ spaceId, spaceName }) => `
+            <div class="pair-space-row rounded-lg border border-gray-200 overflow-hidden mb-2">
+                <button class="pair-space-header w-full flex items-center px-4 py-3 bg-gray-50 hover:bg-gray-100 text-left transition-colors" data-space-id="${spaceId}">
+                    <svg class="arrow-icon w-3 h-3 text-gray-400 mr-3 shrink-0 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                    </svg>
+                    <span class="text-sm font-medium text-gray-700">${_esc(spaceName)}</span>
+                    <span class="ml-auto text-xs text-gray-400">click to load</span>
+                </button>
+                <div class="pair-space-detail hidden"></div>
+            </div>`).join('');
+    }
+
+    function _renderPairRows(rows) {
+        if (!rows.length) {
+            return '<p class="text-gray-400 text-sm px-4 py-3 italic">No pairs found for this space.</p>';
+        }
+        const trs = rows.map(row => {
+            const solver = String(row[2] ?? '').replace(
+                /<img[^>]*src="\/starexec\/images\/external\.png"[^>]*>/g,
+                ' <i class="fas fa-arrow-up-right-from-square text-blue-400 text-xs"></i>'
+            );
+            return `<tr class="hover:bg-gray-50 transition-colors">
+                <td class="px-4 py-2 text-gray-800">${solver}</td>
+                <td class="px-4 py-2 text-gray-800">${_esc(String(row[4] ?? ''))}</td>
+                <td class="px-4 py-2 text-gray-800 font-mono">${_esc(String(row[5] ?? ''))}</td>
+            </tr>`;
+        }).join('');
+        return `
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200 text-xs">
+                    <thead class="bg-white border-b border-gray-200">
+                        <tr>
+                            <th class="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider">Solver</th>
+                            <th class="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider">Result</th>
+                            <th class="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider">Pair ID</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">${trs}</tbody>
+                </table>
+            </div>`;
+    }
+
+    // ---- Page bootstrap ----
+
+    async function loadJobDetail() {
+        const contentEl = document.getElementById('job-content');
+        const titleEl   = document.getElementById('job-title');
+        const PAIRS_ID  = `job-pairs-${JOB_ID}`;
+
+        // Fire both fetches simultaneously — details and spaces race in parallel.
+        const detailsPromise = fetch(`/jobs/${JOB_ID}/json/`)
+            .then(r => r.ok ? r.json() : r.json().then(d => { throw new Error(d.error || `HTTP ${r.status}`); }));
+
+        const pairsPromise = _fetchJobSpaces(JOB_ID);
+
+        // Render stat grid as soon as job details arrive.
+        let job;
+        try {
+            job = await detailsPromise;
+        } catch (err) {
+            contentEl.innerHTML = `
+                <div class="flex flex-col items-center justify-center py-16 text-red-500">
+                    <i class="fas fa-exclamation-circle text-4xl mb-3"></i>
+                    <p class="text-sm font-medium">Could not load job details: ${_esc(err.message)}</p>
+                </div>`;
+            return;
+        }
+
+        const stage     = _stage(job);
+        const name      = job.name ?? `Job ${JOB_ID}`;
+        const desc      = job.description || '';
+        const owner     = job.userId     != null ? String(job.userId)           : 'none';
+        const framework = job.benchmarkingFramework                             ?? 'none';
+        const created   = _formatJobDate(job.createTime);
+        const postProc  = stage.postProcessor?.name                             ?? 'none';
+        const queue     = job.queue?.name                                       ?? 'none';
+        const wallclock = stage.wallclockTimeout ?? job.wallclockTimeout ?? null;
+        const cpu       = stage.cpuTimeout       ?? job.cpuTimeout       ?? null;
+        const memory    = job.maxMemory != null ? (job.maxMemory / 1073741824).toFixed(1) + ' GB' : 'none';
+        const disk      = job.diskSize  != null ? (job.diskSize  / 1073741824).toFixed(2) + ' GB' : 'none';
+        const status    = _jobStatus(job);
+
+        document.title = `${name} — StarExec`;
+        titleEl.innerHTML = `<i class="fa-solid fa-list-check text-orange-400 mr-2"></i>${_esc(name)}`;
+
+        contentEl.innerHTML = `
+            ${desc ? `<p class="text-gray-500 text-sm mb-5">${_esc(desc)}</p>` : ''}
+            <dl class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                ${_statCard('Status',                 _esc(status))}
+                ${_statCard('Owner',                  _esc(owner))}
+                ${_statCard('Queue',                  _esc(queue))}
+                ${_statCard('Benchmarking Framework', _esc(framework))}
+                ${_statCard('Postprocessor',          _esc(postProc))}
+                ${_statCard('Created',                _esc(created))}
+                ${_statCard('CPU Timeout',       cpu       != null ? _esc(String(cpu))       + ' s' : 'none')}
+                ${_statCard('Wallclock Timeout', wallclock != null ? _esc(String(wallclock)) + ' s' : 'none')}
+                ${_statCard('Max Memory',             _esc(memory))}
+                ${_statCard('Disk Usage',             _esc(disk))}
+            </dl>
+
+            <div class="mt-8 border-t border-gray-200 pt-6">
+                <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">Job Pairs</h2>
+                <div id="${PAIRS_ID}" class="flex items-center gap-2 text-gray-400 text-sm py-2">
+                    <i class="fas fa-circle-notch fa-spin"></i>
+                    Loading Job Pairs...
+                </div>
+            </div>`;
+
+        // Populate the pairs accordion once space list arrives.
+        const pairsEl = () => document.getElementById(PAIRS_ID);
+        try {
+            const spaces = await pairsPromise;
+            if (pairsEl()) pairsEl().outerHTML = `<div id="${PAIRS_ID}">${_renderSpacesList(spaces)}</div>`;
+        } catch (err) {
+            if (pairsEl()) pairsEl().innerHTML = `
+                <div class="flex items-center gap-2 text-red-400 text-sm">
+                    <i class="fas fa-exclamation-circle"></i>
+                    Could not load job pairs: ${_esc(err.message)}
+                </div>`;
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        loadJobDetail();
+
+        // Event delegation for the lazy-loading pairs accordion.
+        document.getElementById('job-content').addEventListener('click', async function (e) {
+            const header  = e.target.closest('.pair-space-header');
+            if (!header) return;
+
+            const row     = header.closest('.pair-space-row');
+            const detail  = row?.querySelector('.pair-space-detail');
+            const arrow   = header.querySelector('.arrow-icon');
+            const spaceId = parseInt(header.dataset.spaceId, 10);
+            if (!detail || !spaceId) return;
+
+            // Toggle: close if already open.
+            if (!detail.classList.contains('hidden')) {
+                detail.classList.add('hidden');
+                arrow?.classList.remove('rotate-90');
+                return;
+            }
+
+            detail.classList.remove('hidden');
+            arrow?.classList.add('rotate-90');
+
+            if (detail.dataset.loaded === 'true') return;
+
+            detail.innerHTML = `
+                <div class="flex items-center gap-2 text-gray-400 text-sm px-4 py-3">
+                    <i class="fas fa-circle-notch fa-spin text-xs"></i>
+                    <span class="animate-pulse">Loading Job Pair...</span>
+                </div>`;
+
+            try {
+                const rows = await _fetchSpacePairs(spaceId);
+                detail.innerHTML = _renderPairRows(rows);
+                detail.dataset.loaded = 'true';
+                const hint = header.querySelector('span.ml-auto');
+                if (hint) hint.textContent = `${rows.length} pair${rows.length !== 1 ? 's' : ''}`;
+            } catch (err) {
+                detail.innerHTML = `
+                    <div class="flex items-center gap-2 text-red-400 text-sm px-4 py-3">
+                        <i class="fas fa-exclamation-circle"></i>
+                        ${_esc(err.message)}
+                    </div>`;
+            }
+        });
+    });
+</script>
+</body>
+</html>

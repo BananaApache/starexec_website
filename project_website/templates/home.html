@@ -246,6 +246,27 @@
 </div>
 
 <script>
+    // --- Tree State Persistence ---
+    const TREE_STATE_KEY = 'starexec_tree_state';
+
+    function getTreeState() {
+        try { return new Set(JSON.parse(localStorage.getItem(TREE_STATE_KEY) || '[]')); }
+        catch { return new Set(); }
+    }
+
+    function saveTreeState(ids) {
+        localStorage.setItem(TREE_STATE_KEY, JSON.stringify([...ids]));
+    }
+
+    // toggle does not bubble — use capture phase to catch all <details> toggles
+    document.addEventListener('toggle', function(e) {
+        const treeId = e.target.dataset.treeId;
+        if (!treeId) return;
+        const ids = getTreeState();
+        e.target.open ? ids.add(treeId) : ids.delete(treeId);
+        saveTreeState(ids);
+    }, true);
+
     let selectedNode = null;
     let lastActiveForm = null;
     const contentArea = document.getElementById('content-area');
@@ -500,6 +521,14 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
+        // Restore previously expanded tree nodes
+        const expandedIds = getTreeState();
+        if (expandedIds.size) {
+            document.querySelectorAll('[data-tree-id]').forEach(el => {
+                if (expandedIds.has(el.dataset.treeId)) el.open = true;
+            });
+        }
+
         document.addEventListener('submit', function(e) {
             if (e.target.classList.contains('space-node-form')) {
                 e.preventDefault();

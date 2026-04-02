@@ -1,6 +1,6 @@
 {# Every space is now a folder that contains 5 categories #}
 <li class="select-none my-0.5">
-    <details class="group">
+    <details class="group" data-tree-id="{{ space.attr.id }}">
         {# 1. The Space Header (Just a toggle, does not load content) #}
         <summary class="flex items-center py-1.5 px-2 rounded-lg hover:bg-gray-200 cursor-pointer transition-colors text-sm text-gray-700">
             {# Arrow Icon #}
@@ -88,7 +88,7 @@
 
             {# Category: Subfolders (Recursive Parent) #}
             <li>
-                <details class="group/sub">
+                <details class="group/sub" data-tree-id="{{ space.attr.id }}-sub">
                     {# REMOVED FORM SUBMISSION - Just a Toggle #}
                     <summary class="flex items-center w-full py-1 px-2 rounded hover:bg-gray-100 text-xs text-gray-600 cursor-pointer transition-colors list-none select-none">
                         <div class="flex items-center flex-grow text-left">

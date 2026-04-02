@@ -553,6 +553,49 @@ def job_detail(request, job_id):
 
 
 @login_required
+def proxy_api(request):
+    """
+    Thin single-request proxy for StarExec JSON services (GET and POST).
+
+    Accepts one StarExec API call per Django request so the view returns as
+    quickly as StarExec responds (~1 round-trip).  The multi-step waterfall
+    logic (jobspaces → children → pagination) lives in the frontend JS, which
+    calls this endpoint once per step and coordinates the sequence itself.
+
+    Security: only paths starting with /starexec/services/ are allowed.
+    """
+    target_path = request.GET.get("target", "")
+    if not target_path.startswith("/starexec/services/"):
+        return JsonResponse({"error": "Invalid target path"}, status=400)
+
+    jsessionid = request.session.get("JSESSIONID")
+    if not jsessionid:
+        return JsonResponse({"error": "Not authenticated"}, status=401)
+
+    starexec_url = _get_starexec_url(request)
+    url = f"{starexec_url}{target_path}"
+    cookies = {"JSESSIONID": jsessionid}
+
+    try:
+        if request.method == "POST":
+            # No timeout — pagination endpoints on StarExec can be slow.
+            resp = requests.post(url, data=request.POST, cookies=cookies, timeout=None)
+        else:
+            resp = requests.get(url, cookies=cookies, timeout=10)
+
+        resp.raise_for_status()
+        return JsonResponse(resp.json(), safe=False)
+
+    except requests.exceptions.HTTPError as e:
+        return JsonResponse(
+            {"error": f"StarExec returned {e.response.status_code}"},
+            status=e.response.status_code,
+        )
+    except (ValueError, requests.exceptions.RequestException) as e:
+        return JsonResponse({"error": str(e)}, status=502)
+
+
+@login_required
 def get_job_json(request, job_id):
     """
     Proxies StarExec's JSON details endpoint for a job to avoid CORS.

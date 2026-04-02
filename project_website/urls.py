@@ -28,5 +28,6 @@ urlpatterns = [
     path("jobs/create/", views.create_job, name="create_job"),
     path("jobs/<int:job_id>/", views.job_detail, name="job_detail"),
     path("jobs/<int:job_id>/json/", views.get_job_json, name="job_json"),
+    path("api/proxy/", views.proxy_api, name="proxy_api"),
     path("queues/", views.get_queues, name="get_queues"),
 ]

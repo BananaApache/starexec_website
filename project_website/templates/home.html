@@ -135,7 +135,7 @@
                 </div>
             </div>
             <!-- Content -->
-            <div id="modal-content" class="flex-1 w-full bg-white relative">
+            <div id="modal-content" class="flex-1 w-full bg-white relative overflow-hidden">
                  <!-- Loader -->
                  <div class="absolute inset-0 flex items-center justify-center">
                     <div class="text-center">
@@ -273,6 +273,9 @@
 
     let selectedNode = null;
     let lastActiveForm = null;
+    let _modalOpen = false;
+    const _pairDataCache = new Map();   // spaceId → resolved rows
+    const _pairInflight  = new Map();   // spaceId → in-flight Promise (deduplication)
     const contentArea = document.getElementById('content-area');
     const contentTitle = document.getElementById('content-title');
     const downloadButtonContainer = document.getElementById('download-button-container');
@@ -359,64 +362,219 @@
         return 'Incomplete';
     }
 
+    // --- Job Pairs Waterfall (frontend-orchestrated) ---
+
+    // Read the Django CSRF token from the cookie Django always sets.
+    function _csrfToken() {
+        const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+        return match ? match[1] : '';
+    }
+
+    // Fetch one StarExec services endpoint via the thin Django proxy.
+    // Each call holds a Django thread for exactly one StarExec round-trip.
+    // AbortController enforces a hard per-request timeout.
+    async function _apiFetch(path, options = {}) {
+        const headers = options.method === 'POST'
+            ? { 'X-CSRFToken': _csrfToken() }
+            : {};
+        const r = await fetch(
+            `/api/proxy/?target=${encodeURIComponent(path)}`,
+            { ...options, headers }
+        );
+        if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            throw new Error(d.error || `HTTP ${r.status}`);
+        }
+        return r.json();
+    }
+
+    // --- Tier 1: fetch only steps 1 + 2 (space list, no pagination) ---
+    // Returns [{spaceId, spaceName}, ...] for the accordion.
+    async function _fetchJobSpaces(jobId) {
+        function _sid(node) { return node?.id ?? node?.attr?.id ?? null; }
+
+        const jobspaces = await _apiFetch(
+            `/starexec/services/space/${jobId}/jobspaces/false`
+        );
+        if (!Array.isArray(jobspaces) || !jobspaces.length) return [];
+
+        const rootId = _sid(jobspaces[0]);
+        if (!rootId) return [];
+
+        const children = await _apiFetch(
+            `/starexec/services/space/${jobId}/jobspaces/false?id=${rootId}`
+        );
+        const raw = (Array.isArray(children) && children.length) ? children : [jobspaces[0]];
+
+        return raw
+            .map(s => ({ spaceId: _sid(s), spaceName: s?.data ?? s?.name ?? '?' }))
+            .filter(s => s.spaceId);
+    }
+
+    // --- Tier 2: fetch pagination for one space, with in-memory caching ---
+    // _pairDataCache: resolved rows (survives modal re-opens)
+    // _pairInflight:  in-flight Promise — clicking the same row twice while
+    //                 loading returns the *same* promise, never fires twice.
+    function _fetchSpacePairs(spaceId) {
+        if (_pairDataCache.has(spaceId)) return Promise.resolve(_pairDataCache.get(spaceId));
+        if (_pairInflight.has(spaceId))  return _pairInflight.get(spaceId);
+
+        const body = new URLSearchParams({
+            sEcho: '1', iDisplayStart: '0', iDisplayLength: '200', iSortCol_0: '0',
+        });
+        const promise = _apiFetch(
+            `/starexec/services/jobs/solvers/pagination/${spaceId}/true/true/1/false`,
+            { method: 'POST', body }
+        ).then(data => {
+            const rows = data?.aaData ?? [];
+            _pairDataCache.set(spaceId, rows);
+            _pairInflight.delete(spaceId);
+            return rows;
+        }).catch(err => {
+            _pairInflight.delete(spaceId);
+            throw err;
+        });
+
+        _pairInflight.set(spaceId, promise);
+        return promise;
+    }
+
+    // Renders the Tier 1 accordion: one collapsible row per space.
+    function _renderSpacesList(spaces) {
+        if (!spaces.length) {
+            return '<p class="text-gray-400 text-sm py-2 italic">No job pairs found.</p>';
+        }
+        return spaces.map(({ spaceId, spaceName }) => `
+            <div class="pair-space-row rounded-lg border border-gray-200 overflow-hidden mb-2">
+                <button class="pair-space-header w-full flex items-center px-4 py-3 bg-gray-50 hover:bg-gray-100 text-left transition-colors" data-space-id="${spaceId}">
+                    <svg class="arrow-icon w-3 h-3 text-gray-400 mr-3 shrink-0 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                    </svg>
+                    <span class="text-sm font-medium text-gray-700">${_esc(spaceName)}</span>
+                    <span class="ml-auto text-xs text-gray-400">click to load</span>
+                </button>
+                <div class="pair-space-detail hidden"></div>
+            </div>`).join('');
+    }
+
+    // Renders the Tier 2 table that drops into an expanded accordion row.
+    function _renderPairRows(rows) {
+        if (!rows.length) {
+            return '<p class="text-gray-400 text-sm px-4 py-3 italic">No pairs found for this space.</p>';
+        }
+        const trs = rows.map(row => {
+            const solver = String(row[2] ?? '').replace(
+                /<img[^>]*src="\/starexec\/images\/external\.png"[^>]*>/g,
+                ' <i class="fas fa-arrow-up-right-from-square text-blue-400 text-xs"></i>'
+            );
+            return `<tr class="hover:bg-gray-50 transition-colors">
+                <td class="px-4 py-2 text-gray-800">${solver}</td>
+                <td class="px-4 py-2 text-gray-800">${_esc(String(row[4] ?? ''))}</td>
+                <td class="px-4 py-2 text-gray-800 font-mono">${_esc(String(row[5] ?? ''))}</td>
+            </tr>`;
+        }).join('');
+        return `
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200 text-xs">
+                    <thead class="bg-white border-b border-gray-200">
+                        <tr>
+                            <th class="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider">Solver</th>
+                            <th class="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider">Result</th>
+                            <th class="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider">Pair ID</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">${trs}</tbody>
+                </table>
+            </div>`;
+    }
+
     // Opens a JSON-backed job detail card in the modal.
-    function openJobModal(jobId) {
+    async function openJobModal(jobId) {
         const modal        = document.getElementById('details-modal');
         const modalContent = document.getElementById('modal-content');
         const modalTitle   = document.getElementById('modal-title');
         const externalLink = document.getElementById('modal-external-link');
 
+        _modalOpen = true;
         modal.classList.remove('hidden');
         modalTitle.textContent = '';
         externalLink.href = `${STAREXEC_URL}/starexec/secure/details/job.jsp?id=${jobId}`;
         _showModalLoader(modalContent);
 
-        fetch(`/jobs/${jobId}/json/`)
-            .then(r => {
-                if (!r.ok) return r.json().then(d => { throw new Error(d.error || `HTTP ${r.status}`); });
-                return r.json();
-            })
-            .then(job => {
-                const stage = _stage(job);
+        // Fire both fetches simultaneously — details and pairs race in parallel.
+        // pairsPromise is the frontend-orchestrated waterfall; it doesn't hold
+        // a single Django thread for the full duration.
+        const detailsPromise = fetch(`/jobs/${jobId}/json/`)
+            .then(r => r.ok ? r.json() : r.json().then(d => { throw new Error(d.error || `HTTP ${r.status}`); }));
 
-                const name        = job.name ?? 'Unnamed Job';
-                const status      = _jobStatus(job);
-                const description = job.description || 'none';
-                const owner       = job.userId       != null  ? String(job.userId)           : 'none';
-                const framework   = job.benchmarkingFramework ?? 'none';
-                const created     = _formatJobDate(job.createTime);
-                const postProc    = stage.postProcessor?.name ?? 'none';
-                const queue       = job.queue?.name             ?? 'none';
-                const wallclock   = (stage.wallclockTimeout ?? job.wallclockTimeout ?? null);
-                const cpu         = (stage.cpuTimeout        ?? job.cpuTimeout        ?? null);
-                const memory      = job.maxMemory != null ? (job.maxMemory / 1073741824).toFixed(1) + ' GB' : 'none';
-                const disk        = job.diskSize  != null ? (job.diskSize  / 1073741824).toFixed(2) + ' GB' : 'none';
+        const pairsPromise = _fetchJobSpaces(jobId);
 
-                modalTitle.textContent = name;
+        // Render stat cards as soon as details arrive (don't wait for pairs).
+        let job;
+        try {
+            job = await detailsPromise;
+        } catch (err) {
+            modalTitle.textContent = '';
+            _showModalError(modalContent, `Could not load job details: ${_esc(err.message)}`);
+            return;
+        }
 
-                modalContent.innerHTML = `
-                    <div class="p-6 sm:p-8 overflow-y-auto h-full">
-                        <div class="mb-1">
-                            <p class="text-gray-500 text-sm">${_esc(description)}</p>
-                        </div>
-                        <dl class="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-5">
-                            ${_statCard('Status',                 _esc(status))}
-                            ${_statCard('Owner',                  _esc(owner))}
-                            ${_statCard('Queue',                  _esc(queue))}
-                            ${_statCard('Benchmarking Framework', _esc(framework))}
-                            ${_statCard('Postprocessor',          _esc(postProc))}
-                            ${_statCard('Created',                _esc(created))}
-                            ${_statCard('CPU Timeout',       cpu       != null ? _esc(String(cpu))       + ' s' : 'none')}
-                            ${_statCard('Wallclock Timeout', wallclock != null ? _esc(String(wallclock)) + ' s' : 'none')}
-                            ${_statCard('Max Memory',             _esc(memory))}
-                            ${_statCard('Disk Usage',             _esc(disk))}
-                        </dl>
-                    </div>`;
-            })
-            .catch(err => {
-                modalTitle.textContent = '';
-                _showModalError(modalContent, `Could not load job details: ${_esc(err.message)}`);
-            });
+        const stage = _stage(job);
+        const name        = job.name ?? 'Unnamed Job';
+        const status      = _jobStatus(job);
+        const description = job.description || 'none';
+        const owner       = job.userId       != null ? String(job.userId)            : 'none';
+        const framework   = job.benchmarkingFramework                                ?? 'none';
+        const created     = _formatJobDate(job.createTime);
+        const postProc    = stage.postProcessor?.name                                ?? 'none';
+        const queue       = job.queue?.name                                          ?? 'none';
+        const wallclock   = stage.wallclockTimeout ?? job.wallclockTimeout ?? null;
+        const cpu         = stage.cpuTimeout        ?? job.cpuTimeout        ?? null;
+        const memory      = job.maxMemory != null ? (job.maxMemory / 1073741824).toFixed(1) + ' GB' : 'none';
+        const disk        = job.diskSize  != null ? (job.diskSize  / 1073741824).toFixed(2) + ' GB' : 'none';
+
+        modalTitle.textContent = name;
+
+        const PAIRS_ID = `job-pairs-${jobId}`;
+        modalContent.innerHTML = `
+            <div class="p-6 sm:p-8 overflow-y-auto h-full">
+                <div class="mb-1">
+                    <p class="text-gray-500 text-sm">${_esc(description)}</p>
+                </div>
+                <dl class="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-5">
+                    ${_statCard('Status',                 _esc(status))}
+                    ${_statCard('Owner',                  _esc(owner))}
+                    ${_statCard('Queue',                  _esc(queue))}
+                    ${_statCard('Benchmarking Framework', _esc(framework))}
+                    ${_statCard('Postprocessor',          _esc(postProc))}
+                    ${_statCard('Created',                _esc(created))}
+                    ${_statCard('CPU Timeout',       cpu       != null ? _esc(String(cpu))       + ' s' : 'none')}
+                    ${_statCard('Wallclock Timeout', wallclock != null ? _esc(String(wallclock)) + ' s' : 'none')}
+                    ${_statCard('Max Memory',             _esc(memory))}
+                    ${_statCard('Disk Usage',             _esc(disk))}
+                </dl>
+
+                <div class="mt-8 border-t border-gray-200 pt-6">
+                    <h3 class="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">Job Pairs</h3>
+                    <div id="${PAIRS_ID}" class="flex items-center gap-2 text-gray-400 text-sm py-2">
+                        <i class="fas fa-circle-notch fa-spin"></i>
+                        Loading Job Pairs...
+                    </div>
+                </div>
+            </div>`;
+
+        // Update only the pairs container once that fetch resolves.
+        const pairsEl = () => document.getElementById(PAIRS_ID);
+        try {
+            const spaces = await pairsPromise;
+            if (_modalOpen && pairsEl()) pairsEl().outerHTML = `<div id="${PAIRS_ID}">${_renderSpacesList(spaces)}</div>`;
+        } catch (err) {
+            if (_modalOpen && pairsEl()) pairsEl().innerHTML = `
+                <div class="flex items-center gap-2 text-red-400 text-sm">
+                    <i class="fas fa-exclamation-circle"></i>
+                    Could not load job pairs: ${_esc(err.message)}
+                </div>`;
+        }
     }
 
     // Opens a proxied StarExec HTML page in an iframe (used for non-job detail links).
@@ -445,6 +603,7 @@
     }
 
     function closeModal() {
+        _modalOpen = false;
         document.getElementById('details-modal').classList.add('hidden');
     }
 
@@ -635,6 +794,61 @@
                 if (expandedIds.has(el.dataset.treeId)) el.open = true;
             });
         }
+
+        // --- Lazy-load event delegation for Job Pair accordion rows ---
+        // Attached once to the stable #modal-content element; handles all
+        // dynamically-created .pair-space-header clicks via bubbling.
+        document.getElementById('modal-content').addEventListener('click', async function(e) {
+            const header = e.target.closest('.pair-space-header');
+            if (!header) return;
+
+            const row    = header.closest('.pair-space-row');
+            const detail = row?.querySelector('.pair-space-detail');
+            const arrow  = header.querySelector('.arrow-icon');
+            const spaceId = parseInt(header.dataset.spaceId, 10);
+            if (!detail || !spaceId) return;
+
+            // Toggle: close if already open
+            if (!detail.classList.contains('hidden')) {
+                detail.classList.add('hidden');
+                arrow?.classList.remove('rotate-90');
+                return;
+            }
+
+            // Open the accordion pane
+            detail.classList.remove('hidden');
+            arrow?.classList.add('rotate-90');
+
+            // If already populated in this render cycle, don't re-fetch
+            if (detail.dataset.loaded === 'true') return;
+
+            // Show inline spinner while fetching — no timeout, may take a while.
+            detail.innerHTML = `
+                <div class="flex items-center gap-2 text-gray-400 text-sm px-4 py-3">
+                    <i class="fas fa-circle-notch fa-spin text-xs"></i>
+                    <span class="animate-pulse">Loading Job Pair...</span>
+                </div>`;
+
+            try {
+                // _pairDataCache: resolved rows persist across re-opens.
+                // _pairInflight: duplicate clicks share the same in-flight Promise.
+                const rows = await _fetchSpacePairs(spaceId);
+                if (!_modalOpen) return;   // modal was closed while we were waiting
+                detail.innerHTML = _renderPairRows(rows);
+                detail.dataset.loaded = 'true';
+
+                // Update the header hint text now that we know the count
+                const hint = header.querySelector('span.ml-auto');
+                if (hint) hint.textContent = `${rows.length} pair${rows.length !== 1 ? 's' : ''}`;
+            } catch (err) {
+                if (!_modalOpen) return;   // discard stale error after close
+                detail.innerHTML = `
+                    <div class="flex items-center gap-2 text-red-400 text-sm px-4 py-3">
+                        <i class="fas fa-exclamation-circle"></i>
+                        ${_esc(err.message)}
+                    </div>`;
+            }
+        });
 
         document.addEventListener('submit', function(e) {
             if (e.target.classList.contains('space-node-form')) {

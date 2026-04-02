@@ -529,3 +529,137 @@ def proxy_starexec_page(request):
 
     except Exception as e:
         return HttpResponse(f"Proxy error: {str(e)}", status=500)
+
+
+@login_required
+def create_job(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request method"}, status=405)
+
+    jsessionid = request.session.get("JSESSIONID")
+    if not jsessionid:
+        return JsonResponse({"error": "Not authenticated"}, status=401)
+
+    starexec_url = _get_starexec_url(request)
+    space_id = request.POST.get("spaceId", "")
+    cookies = {"JSESSIONID": jsessionid}
+
+    # Step 1: Fetch add/job.jsp to get StarExec's own CSRF token and solver/config pairs
+    csrf_token = ""
+    solver_config_pairs = []
+    try:
+        jsp_resp = requests.get(
+            f"{starexec_url}/starexec/secure/add/job.jsp",
+            params={"sid": space_id},
+            cookies=cookies,
+        )
+        soup = bs(jsp_resp.text, "html.parser")
+
+        csrf_input = soup.find("input", {"name": "csrfToken"})
+        if csrf_input:
+            csrf_token = csrf_input.get("value", "")
+
+        # Extract solver/config pairs from the form checkboxes
+        solver_inputs = soup.find_all("input", {"name": "solver"})
+        config_inputs = soup.find_all("input", {"name": "configs"})
+        for s, c in zip(solver_inputs, config_inputs):
+            s_val = s.get("value", "")
+            c_val = c.get("value", "")
+            if s_val and c_val:
+                solver_config_pairs.append((s_val, c_val))
+
+    except Exception as e:
+        print(f"Warning: could not fetch add/job.jsp: {e}")
+
+    # Step 2: Build the ordered list of POST pairs (preserving multiple solver/configs)
+    pause_val = "yes" if request.POST.get("pause") == "true" else "no"
+    pre = request.POST.get("preProcess", "").strip() or "-1"
+    post = request.POST.get("postProcess", "").strip() or "-1"
+
+    post_pairs = [
+        ("sid", space_id),
+        ("csrfToken", csrf_token),
+        ("name", request.POST.get("name", "")),
+        ("desc", request.POST.get("desc", "")),
+        ("preProcess", pre),
+        ("postProcess", post),
+        ("queue", request.POST.get("queue", "")),
+        ("wallclockTimeout", request.POST.get("wallclockTimeout", "300")),
+        ("cpuTimeout", request.POST.get("cpuTimeout", "300")),
+        ("maxMem", request.POST.get("maxMem", "1.0")),
+        ("subscribe", "no"),
+        ("traversal", request.POST.get("traversal", "depth")),
+        ("pause", pause_val),
+        ("seed", "0"),
+        ("benchmarkingFramework", "RUNSOLVER"),
+        ("resultsInterval", "0"),
+        ("saveOtherOutput", "false"),
+        ("suppressTimestamp", "no"),
+        ("killDelay", "0"),
+        ("softTimeLimit", "0"),
+        ("runChoice", request.POST.get("runChoice", "keepHierarchy")),
+    ]
+    for solver_id, config_id in solver_config_pairs:
+        post_pairs.append(("solver", solver_id))
+        post_pairs.append(("configs", config_id))
+
+    from urllib.parse import urlencode
+    encoded_body = urlencode(post_pairs)
+
+    url = f"{starexec_url}/starexec/secure/add/job"
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Origin": starexec_url,
+        "Referer": f"{starexec_url}/starexec/secure/add/job.jsp?sid={space_id}",
+        "Connection": "keep-alive",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+
+    try:
+        response = requests.post(
+            url,
+            headers=headers,
+            cookies=cookies,
+            data=encoded_body,
+            allow_redirects=False,
+        )
+
+        new_id = response.cookies.get("New_ID")
+        status_msg = response.cookies.get("STATUS_MESSAGE_STRING")
+
+        if response.status_code in (200, 302) and new_id:
+            return JsonResponse({"success": True, "job_id": new_id})
+        elif status_msg:
+            return JsonResponse({"error": status_msg}, status=400)
+        elif response.status_code in (200, 302):
+            return JsonResponse({"success": True, "job_id": None})
+        else:
+            snippet = response.text if response.text else ""
+            return JsonResponse(
+                {"error": f"StarExec returned status {response.status_code}", "detail": snippet},
+                status=400,
+            )
+
+    except requests.exceptions.RequestException as e:
+        return JsonResponse({"error": str(e)}, status=503)
+
+
+@login_required
+def get_queues(request):
+    jsessionid = request.session.get("JSESSIONID")
+    if not jsessionid:
+        return JsonResponse({"error": "Not authenticated"}, status=401)
+
+    starexec_url = _get_starexec_url(request)
+
+    try:
+        response = requests.get(
+            f"{starexec_url}/starexec/services/cluster/queues",
+            cookies={"JSESSIONID": jsessionid},
+            timeout=10,
+        )
+        response.raise_for_status()
+        return JsonResponse(response.json(), safe=False)
+    except requests.exceptions.RequestException as e:
+        return JsonResponse({"error": str(e)}, status=503)

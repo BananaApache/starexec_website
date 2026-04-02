@@ -24,4 +24,7 @@ urlpatterns = [
         views.download_space_xml_file,
         name="download_space_xml",
     ),
+    # Job Creation
+    path("jobs/create/", views.create_job, name="create_job"),
+    path("queues/", views.get_queues, name="get_queues"),
 ]

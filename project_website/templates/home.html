@@ -247,9 +247,10 @@
 
 <script>
     let selectedNode = null;
+    let lastActiveForm = null;
     const contentArea = document.getElementById('content-area');
     const contentTitle = document.getElementById('content-title');
-    const downloadButtonContainer = document.getElementById('download-button-container'); 
+    const downloadButtonContainer = document.getElementById('download-button-container');
 
     // --- NEW: Event Delegation for Table Links ---
     // This intercepts clicks on links inside the content area
@@ -430,11 +431,12 @@
     }
 
     async function loadSpaceContent(form) {
+        lastActiveForm = form;
         const clickedButton = form.querySelector('.space-node');
         if (selectedNode) selectedNode.classList.remove('selected-node');
-        if (clickedButton) { 
-            clickedButton.classList.add('selected-node'); 
-            selectedNode = clickedButton; 
+        if (clickedButton) {
+            clickedButton.classList.add('selected-node');
+            selectedNode = clickedButton;
         }
 
         const formData = new FormData(form);
@@ -529,7 +531,10 @@
                         : 'Job created successfully!';
                     msgEl.className = 'text-sm rounded-lg px-3 py-2 bg-green-50 text-green-700 border border-green-200';
                     msgEl.classList.remove('hidden');
-                    setTimeout(closeCreateJobModal, 2500);
+                    setTimeout(() => {
+                        closeCreateJobModal();
+                        if (lastActiveForm) loadSpaceContent(lastActiveForm);
+                    }, 2000);
                 } else {
                     const detail = result.detail ? ` — ${result.detail}` : '';
                     msgEl.textContent = (result.error || 'Failed to create job.') + detail;

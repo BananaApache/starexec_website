@@ -476,8 +476,33 @@ def logout_view(request):
     return redirect("/home")
 
 
+def _fetch_starexec_html(jsessionid, starexec_url, path):
+    """
+    Fetch a StarExec page and rewrite relative asset URLs to absolute.
+    Returns (content, None) on success or (error_message, status_code) on failure.
+    """
+    try:
+        resp = requests.get(
+            f"{starexec_url}{path}",
+            cookies={"JSESSIONID": jsessionid},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return None, resp.status_code
+
+        content = resp.text
+        content = content.replace('src="/', f'src="{starexec_url}/')
+        content = content.replace("src='/", f"src='{starexec_url}/")
+        content = content.replace('href="/', f'href="{starexec_url}/')
+        content = content.replace("href='/", f"href='{starexec_url}/")
+        return content, None
+
+    except Exception as e:
+        return str(e), 500
+
+
 # ---------------------------------------------------------
-# NEW: Proxy View to fetch StarExec details pages
+# Proxy View to fetch StarExec detail pages (used by modal)
 # ---------------------------------------------------------
 @login_required
 def proxy_starexec_page(request):
@@ -490,7 +515,6 @@ def proxy_starexec_page(request):
     if not target_path:
         return HttpResponse("No target URL provided", status=400)
 
-    # Security check: ensure we are only proxying to StarExec
     if not target_path.startswith("/starexec/"):
         return HttpResponse("Invalid target path", status=400)
 
@@ -499,36 +523,61 @@ def proxy_starexec_page(request):
         return HttpResponse("Unauthorized", status=401)
 
     starexec_url = _get_starexec_url(request)
-    url = f"{starexec_url}{target_path}"
+    content, err = _fetch_starexec_html(jsessionid, starexec_url, target_path)
+
+    if err:
+        return HttpResponse(f"Proxy error: {content}", status=err)
+    return HttpResponse(content)
+
+
+# ---------------------------------------------------------
+# Dedicated job detail page (used by Cmd/Ctrl+Click)
+# ---------------------------------------------------------
+@login_required
+def job_detail(request, job_id):
+    """
+    Renders a StarExec job detail page standalone (same content as the modal,
+    but as a full browser tab). Reached via Cmd/Ctrl+Click on a job link.
+    """
+    jsessionid = request.session.get("JSESSIONID")
+    if not jsessionid:
+        return redirect("login")
+
+    starexec_url = _get_starexec_url(request)
+    path = f"/starexec/secure/details/job.jsp?id={job_id}"
+    content, err = _fetch_starexec_html(jsessionid, starexec_url, path)
+
+    if err:
+        return HttpResponse(f"Error loading job {job_id}: {content}", status=err)
+    return HttpResponse(content)
+
+
+@login_required
+def get_job_json(request, job_id):
+    """
+    Proxies StarExec's JSON details endpoint for a job to avoid CORS.
+    Returns the raw JSON payload from /starexec/services/details/job/{id}.
+    """
+    jsessionid = request.session.get("JSESSIONID")
+    if not jsessionid:
+        return JsonResponse({"error": "Not authenticated"}, status=401)
+
+    starexec_url = _get_starexec_url(request)
+    url = f"{starexec_url}/starexec/services/details/job/{job_id}"
 
     try:
-        # Fetch the page using the user's session
-        resp = requests.get(url, cookies={"JSESSIONID": jsessionid}, timeout=15)
-
-        if resp.status_code != 200:
-            return HttpResponse(
-                f"Error fetching page: {resp.status_code}", status=resp.status_code
-            )
-
-        content = resp.text
-
-        # --- HTML Rewriting for Assets ---
-        # StarExec uses relative paths for images, css, js. We need to point them to the absolute URL.
-        base_url = starexec_url
-
-        # Rewrite src="/..." -> src="https://starexec.../..."
-        content = content.replace('src="/', f'src="{base_url}/')
-        content = content.replace("src='/", f"src='{base_url}/")
-
-        # Rewrite href="/..." -> href="https://starexec.../..." (for CSS links)
-        content = content.replace('href="/', f'href="{base_url}/')
-        content = content.replace("href='/", f"href='{base_url}/")
-
-        # Return the modified HTML
-        return HttpResponse(content)
-
-    except Exception as e:
-        return HttpResponse(f"Proxy error: {str(e)}", status=500)
+        resp = requests.get(url, cookies={"JSESSIONID": jsessionid}, timeout=10)
+        resp.raise_for_status()
+        return JsonResponse(resp.json(), safe=False)
+    except requests.exceptions.HTTPError as e:
+        return JsonResponse(
+            {"error": f"StarExec returned {e.response.status_code}"},
+            status=e.response.status_code,
+        )
+    except requests.exceptions.RequestException as e:
+        return JsonResponse({"error": str(e)}, status=503)
+    except ValueError:
+        return JsonResponse({"error": "Invalid JSON from StarExec"}, status=502)
 
 
 @login_required

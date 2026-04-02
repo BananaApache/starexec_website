@@ -120,11 +120,12 @@
     <div id="details-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden flex items-center justify-center z-50 p-4 backdrop-blur-sm transition-opacity duration-300">
         <div class="bg-white w-full max-w-6xl h-[90vh] rounded-xl shadow-2xl flex flex-col overflow-hidden animate-fade-in relative">
             <!-- Header -->
-            <div class="bg-gray-100 px-4 py-3 border-b flex items-center justify-between shrink-0">
-                <button onclick="closeModal()" class="flex items-center text-gray-700 hover:text-blue-600 transition-colors font-medium">
+            <div class="bg-gray-100 px-4 py-3 border-b flex items-center gap-4 shrink-0">
+                <button onclick="closeModal()" class="flex items-center text-gray-700 hover:text-blue-600 transition-colors font-medium shrink-0">
                     <i class="fas fa-arrow-left mr-2"></i> Back
                 </button>
-                <div class="flex space-x-4">
+                <h3 id="modal-title" class="flex-1 text-sm font-semibold text-gray-800 truncate"></h3>
+                <div class="flex space-x-4 shrink-0">
                      <a id="modal-external-link" href="#" target="_blank" class="text-blue-600 hover:text-blue-800 text-sm flex items-center">
                         <i class="fas fa-external-link-alt mr-1"></i> Open in New Tab
                      </a>
@@ -246,6 +247,9 @@
 </div>
 
 <script>
+    // Base URL of the StarExec server — injected server-side, never hardcoded.
+    const STAREXEC_URL = "{{ starexec_url }}";
+
     // --- Tree State Persistence ---
     const TREE_STATE_KEY = 'starexec_tree_state';
 
@@ -273,68 +277,171 @@
     const contentTitle = document.getElementById('content-title');
     const downloadButtonContainer = document.getElementById('download-button-container');
 
-    // --- NEW: Event Delegation for Table Links ---
-    // This intercepts clicks on links inside the content area
+    // Event delegation for table links — intercepts clicks on StarExec detail links
     contentArea.addEventListener('click', function(e) {
-        // Find if the click target or its parent is an anchor tag
         const link = e.target.closest('a');
-        
-        // If it is a link, and it points to a StarExec secure page (details)
-        if (link && link.href) {
-            const href = link.getAttribute('href');
-            
-            // Check if it matches the StarExec detail pattern
-            // Note: Format is usually /starexec/secure/details/... or similar
-            if (href.startsWith('/starexec/secure/') || href.includes('details')) {
-                e.preventDefault();
-                openModal(href);
-            }
+        if (!link) return;
+
+        const href = link.getAttribute('href');
+        if (!href || !(href.startsWith('/starexec/secure/') || href.includes('details'))) return;
+
+        // Always prevent default: the raw StarExec path would 404 on Django.
+        e.preventDefault();
+
+        const jobMatch = href.match(/job\.jsp\?id=(\d+)/);
+        const jobId = jobMatch ? parseInt(jobMatch[1], 10) : null;
+
+        if (e.metaKey || e.ctrlKey) {
+            // Cmd/Ctrl+Click → new tab.
+            window.open(
+                jobId ? `/jobs/${jobId}/` : `/proxy/?target=${encodeURIComponent(href)}`,
+                '_blank'
+            );
+        } else if (jobId) {
+            openJobModal(jobId);
+        } else {
+            openModal(href);
         }
     });
 
-    function openModal(url) {
-        const modal = document.getElementById('details-modal');
-        const modalContent = document.getElementById('modal-content');
-        const externalLink = document.getElementById('modal-external-link');
-        
-        modal.classList.remove('hidden');
-        externalLink.href = `{{ starexec_url }}${url}`;
-        
-        // Reset content to loader
+    // --- Modal helpers ---
+
+    function _showModalLoader(modalContent) {
         modalContent.innerHTML = `
             <div class="absolute inset-0 flex items-center justify-center">
                 <div class="text-center">
                     <i class="fas fa-circle-notch fa-spin text-4xl text-blue-500 mb-2"></i>
                     <p class="text-gray-500">Loading details...</p>
                 </div>
-            </div>
-        `;
-        
-        // Fetch content via our Django proxy to avoid CORS
+            </div>`;
+    }
+
+    function _showModalError(modalContent, message) {
+        modalContent.innerHTML = `
+            <div class="flex flex-col items-center justify-center h-full text-red-500 min-h-[200px]">
+                <i class="fas fa-exclamation-circle text-4xl mb-3"></i>
+                <p class="text-sm font-medium">${message}</p>
+            </div>`;
+    }
+
+    function _esc(str) {
+        return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function _statCard(label, value) {
+        return `<div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                    <dt class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">${label}</dt>
+                    <dd class="text-sm font-medium text-gray-800">${value}</dd>
+                </div>`;
+    }
+
+    // Returns the first stageAttributes entry, or {} if missing/empty.
+    function _stage(job) { return job.stageAttributes?.[0] ?? {}; }
+
+    // Formats a timestamp as "MMM DD YYYY hh:mm:ss AM/PM".
+    function _formatJobDate(ts) {
+        if (!ts) return 'none';
+        const d = new Date(ts);
+        const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const day  = String(d.getDate()).padStart(2, '0');
+        let   hr   = d.getHours();
+        const ampm = hr >= 12 ? 'PM' : 'AM';
+        hr = hr % 12 || 12;
+        const mm   = String(d.getMinutes()).padStart(2, '0');
+        const ss   = String(d.getSeconds()).padStart(2, '0');
+        return `${MON[d.getMonth()]} ${day} ${d.getFullYear()} ${String(hr).padStart(2,'0')}:${mm}:${ss} ${ampm}`;
+    }
+
+    // Derives a human-readable status string from the job object.
+    function _jobStatus(job) {
+        if (job.deleted) return 'Deleted';
+        if (job.paused)  return 'Paused';
+        return 'Incomplete';
+    }
+
+    // Opens a JSON-backed job detail card in the modal.
+    function openJobModal(jobId) {
+        const modal        = document.getElementById('details-modal');
+        const modalContent = document.getElementById('modal-content');
+        const modalTitle   = document.getElementById('modal-title');
+        const externalLink = document.getElementById('modal-external-link');
+
+        modal.classList.remove('hidden');
+        modalTitle.textContent = '';
+        externalLink.href = `${STAREXEC_URL}/starexec/secure/details/job.jsp?id=${jobId}`;
+        _showModalLoader(modalContent);
+
+        fetch(`/jobs/${jobId}/json/`)
+            .then(r => {
+                if (!r.ok) return r.json().then(d => { throw new Error(d.error || `HTTP ${r.status}`); });
+                return r.json();
+            })
+            .then(job => {
+                const stage = _stage(job);
+
+                const name        = job.name ?? 'Unnamed Job';
+                const status      = _jobStatus(job);
+                const description = job.description || 'none';
+                const owner       = job.userId       != null  ? String(job.userId)           : 'none';
+                const framework   = job.benchmarkingFramework ?? 'none';
+                const created     = _formatJobDate(job.createTime);
+                const postProc    = stage.postProcessor?.name ?? 'none';
+                const queue       = job.queue?.name             ?? 'none';
+                const wallclock   = (stage.wallclockTimeout ?? job.wallclockTimeout ?? null);
+                const cpu         = (stage.cpuTimeout        ?? job.cpuTimeout        ?? null);
+                const memory      = job.maxMemory != null ? (job.maxMemory / 1073741824).toFixed(1) + ' GB' : 'none';
+                const disk        = job.diskSize  != null ? (job.diskSize  / 1073741824).toFixed(2) + ' GB' : 'none';
+
+                modalTitle.textContent = name;
+
+                modalContent.innerHTML = `
+                    <div class="p-6 sm:p-8 overflow-y-auto h-full">
+                        <div class="mb-1">
+                            <p class="text-gray-500 text-sm">${_esc(description)}</p>
+                        </div>
+                        <dl class="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-5">
+                            ${_statCard('Status',                 _esc(status))}
+                            ${_statCard('Owner',                  _esc(owner))}
+                            ${_statCard('Queue',                  _esc(queue))}
+                            ${_statCard('Benchmarking Framework', _esc(framework))}
+                            ${_statCard('Postprocessor',          _esc(postProc))}
+                            ${_statCard('Created',                _esc(created))}
+                            ${_statCard('CPU Timeout',       cpu       != null ? _esc(String(cpu))       + ' s' : 'none')}
+                            ${_statCard('Wallclock Timeout', wallclock != null ? _esc(String(wallclock)) + ' s' : 'none')}
+                            ${_statCard('Max Memory',             _esc(memory))}
+                            ${_statCard('Disk Usage',             _esc(disk))}
+                        </dl>
+                    </div>`;
+            })
+            .catch(err => {
+                modalTitle.textContent = '';
+                _showModalError(modalContent, `Could not load job details: ${_esc(err.message)}`);
+            });
+    }
+
+    // Opens a proxied StarExec HTML page in an iframe (used for non-job detail links).
+    function openModal(url) {
+        const modal = document.getElementById('details-modal');
+        const modalContent = document.getElementById('modal-content');
+        const externalLink = document.getElementById('modal-external-link');
+
+        modal.classList.remove('hidden');
+        externalLink.href = `${STAREXEC_URL}${url}`;
+        _showModalLoader(modalContent);
+
         fetch(`/proxy/?target=${encodeURIComponent(url)}`)
-            .then(response => {
-                if (!response.ok) throw new Error("Failed to load content");
-                return response.text();
+            .then(r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.text();
             })
             .then(html => {
-                // Use an iframe to isolate the external HTML/CSS from our app
                 const iframe = document.createElement('iframe');
-                iframe.style.width = '100%';
-                iframe.style.height = '100%';
-                iframe.style.border = 'none';
+                iframe.style.cssText = 'width:100%;height:100%;border:none;';
                 iframe.srcdoc = html;
-                
                 modalContent.innerHTML = '';
                 modalContent.appendChild(iframe);
             })
-            .catch(err => {
-                modalContent.innerHTML = `
-                    <div class="flex flex-col items-center justify-center h-full text-red-500">
-                        <i class="fas fa-exclamation-circle text-4xl mb-2"></i>
-                        <p>Error loading content: ${err.message}</p>
-                    </div>
-                `;
-            });
+            .catch(err => _showModalError(modalContent, `Could not load content: ${_esc(err.message)}`));
     }
 
     function closeModal() {

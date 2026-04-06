@@ -325,43 +325,82 @@ def get_space_content(request):
     return JsonResponse({"error": "Invalid request method"}, status=405)
 
 
-def build_space_tree(api_cookies, space_id=-1, level=0, parent_name="", starexec_url=None):
+def build_space_tree(api_cookies, starexec_url=None):
+    """
+    Fetches *only* the first meaningful level of spaces — exactly 2 HTTP calls.
+    Previously this was recursive (one call per node = N+1 requests).
+    Deeper levels are now lazy-loaded by the browser via get_subspace_children.
+    """
     if starexec_url is None:
         starexec_url = STAREXEC_URL
-    params = {
-        "id": space_id,
-    }
 
-    try:
-        response = requests.get(
+    def _fetch(space_id):
+        r = requests.get(
             f"{starexec_url}/starexec/services/space/subspaces",
             cookies=api_cookies,
-            params=params,
+            params={"id": space_id},
+            timeout=10,
         )
-        response.raise_for_status()
-        subspaces = response.json()
+        r.raise_for_status()
+        return r.json()
+
+    try:
+        root = _fetch(-1)
+        # StarExec root is a single wrapper node (id=1); skip it to get real spaces.
+        if root and root[0].get("attr", {}).get("id") == 1:
+            spaces = _fetch(root[0]["attr"]["id"])
+        else:
+            spaces = root
+
+        for s in spaces:
+            s["level"] = 1
+            s["is_child_of_users"] = False
+            s.pop("children", None)   # no recursive data
+
+        return spaces
 
     except (json.JSONDecodeError, ValueError, requests.RequestException) as e:
-        print(f"Error fetching data or decoding JSON for space_id {space_id}: {e}")
+        print(f"Error fetching root spaces: {e}")
         return []
 
-    for subspace in subspaces:
-        subspace["level"] = level
-        subspace["is_child_of_users"] = parent_name == "Users"
 
-        current_id = subspace["attr"]["id"]
-        current_data_name = subspace.get("data", "")
+@login_required
+def get_subspace_children(request, space_id):
+    """
+    Returns the direct children of a space as slim JSON:
+      [{"id": 123, "name": "My Space", "is_child_of_users": false}, ...]
+    Called by the browser when a Subspaces <details> folder is opened.
+    Pass ?parent_name=Users to flag children as user-space nodes.
+    """
+    jsessionid = request.session.get("JSESSIONID")
+    if not jsessionid:
+        return JsonResponse({"error": "Not authenticated"}, status=401)
 
-        subspace["children"] = build_space_tree(
-            api_cookies, current_id, level + 1, current_data_name, starexec_url
+    starexec_url = _get_starexec_url(request)
+    parent_name  = request.GET.get("parent_name", "")
+    try:
+        resp = requests.get(
+            f"{starexec_url}/starexec/services/space/subspaces",
+            cookies={"JSESSIONID": jsessionid},
+            params={"id": space_id},
+            timeout=10,
         )
-
-    if space_id == -1 and subspaces and len(subspaces) > 0:
-        first_node = subspaces[0]
-        if first_node.get("attr", {}).get("id") == 1:
-            return first_node.get("children", [])
-
-    return subspaces
+        resp.raise_for_status()
+        spaces = []
+        for s in resp.json():
+            sid = s.get("attr", {}).get("id") or s.get("id")
+            if not sid:
+                continue
+            spaces.append({
+                "id":              sid,
+                "name":            s.get("data") or s.get("name", ""),
+                "is_child_of_users": parent_name == "Users",
+            })
+        return JsonResponse(spaces, safe=False)
+    except requests.exceptions.RequestException as e:
+        return JsonResponse({"error": str(e)}, status=503)
+    except ValueError:
+        return JsonResponse({"error": "Invalid JSON from StarExec"}, status=502)
 
 
 @login_required
@@ -735,6 +774,46 @@ def create_job(request):
 
     except requests.exceptions.RequestException as e:
         return JsonResponse({"error": str(e)}, status=503)
+
+
+@login_required
+def get_space_jobs(request, space_id):
+    """
+    Returns a slim JSON list of jobs for a given space so the sidebar tree can
+    render individual job nodes without a full page reload:
+      [{"id": 123, "name": "My Job", "status": "Running"}, ...]
+    Parses StarExec's jobs/pagination HTML cells to extract id, name, and status.
+    """
+    jsessionid = request.session.get("JSESSIONID")
+    if not jsessionid:
+        return JsonResponse({"error": "Not authenticated"}, status=401)
+
+    starexec_url = _get_starexec_url(request)
+    try:
+        resp = requests.post(
+            f"{starexec_url}/starexec/services/space/{space_id}/jobs/pagination",
+            cookies={"JSESSIONID": jsessionid},
+            data={"sEcho": "5", "iDisplayStart": "0", "iDisplayLength": "100", "iSortCol_0": "0"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        jobs = []
+        for row in resp.json().get("aaData", []):
+            id_match = re.search(r'job\.jsp\?id=(\d+)', str(row[0]))
+            if not id_match:
+                continue
+            jobs.append({
+                "id":        int(id_match.group(1)),
+                # Send the raw HTML cell — JS uses DOMParser to extract the
+                # link text, handling nested tags like <img> without regex.
+                "name_html": str(row[0]),
+                "status":    re.sub(r'<[^>]+>', '', str(row[1])).strip() if len(row) > 1 else "",
+            })
+        return JsonResponse(jobs, safe=False)
+    except requests.exceptions.RequestException as e:
+        return JsonResponse({"error": str(e)}, status=503)
+    except ValueError:
+        return JsonResponse({"error": "Invalid JSON from StarExec"}, status=502)
 
 
 @login_required

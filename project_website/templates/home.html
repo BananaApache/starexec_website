@@ -30,7 +30,8 @@
 
         a { color: inherit; text-decoration: none; }
 
-        .space-node.selected-node {
+        .space-node.selected-node,
+        .job-node-btn.selected-node {
             background-color: #eff6ff;
             color: #1d4ed8;
             font-weight: 600;
@@ -69,7 +70,7 @@
             </nav>
 
             <main class="w-full max-w-[90rem] bg-white/80 backdrop-blur-lg rounded-2xl shadow-xl overflow-hidden flex flex-col md:flex-row min-h-[85vh]">
-                <aside class="w-full md:w-1/3 p-6 border-b md:border-b-0 md:border-r border-gray-200/60 overflow-y-auto max-h-[80vh]">
+                <aside id="spaces-sidebar" class="w-full md:w-1/3 p-6 border-b md:border-b-0 md:border-r border-gray-200/60 overflow-y-auto max-h-[80vh]">
                     <div class="flex items-center justify-between mb-6">
                         <h3 class="text-2xl font-bold text-gray-900">My Spaces</h3>
                     </div>
@@ -268,6 +269,26 @@
         const ids = getTreeState();
         e.target.open ? ids.add(treeId) : ids.delete(treeId);
         saveTreeState(ids);
+
+        // Lazy-load job nodes when a job-folder is opened for the first time.
+        if (e.target.open && e.target.dataset.jobFolder === 'true') {
+            const listEl = e.target.querySelector('.job-nodes-list');
+            if (listEl && listEl.dataset.loaded !== 'true') {
+                loadJobNodes(parseInt(e.target.dataset.spaceId, 10), listEl);
+            }
+        }
+
+        // Lazy-load subspace nodes when a subspace-folder is opened for the first time.
+        if (e.target.open && e.target.dataset.subspaceFolder === 'true') {
+            const listEl = e.target.querySelector('.subspace-nodes-list');
+            if (listEl && listEl.dataset.loaded !== 'true') {
+                loadSubspaceNodes(
+                    parseInt(e.target.dataset.spaceId, 10),
+                    listEl,
+                    e.target.dataset.spaceName || ''
+                );
+            }
+        }
     }, true);
 
     let selectedNode = null;
@@ -371,7 +392,7 @@
 
     // Fetch one StarExec services endpoint via the thin Django proxy.
     // Each call holds a Django thread for exactly one StarExec round-trip.
-    // AbortController enforces a hard per-request timeout.
+    // POST requests carry no timeout; GET requests use a 10 s timeout (set server-side).
     async function _apiFetch(path, options = {}) {
         const headers = options.method === 'POST'
             ? { 'X-CSRFToken': _csrfToken() }
@@ -742,6 +763,263 @@
         saveTreeState(ids);
     }
 
+    // Builds the full HTML for one lazily-injected space node, mirroring
+    // space_node.html so JS-rendered nodes are visually identical to server-rendered ones.
+    function _renderSpaceNodeHtml(space, level) {
+        const csrf    = _csrfToken();
+        const id      = space.id;
+        const name    = space.name;
+        const isUsers = name === 'Users';
+        const isChild = space.is_child_of_users;
+
+        const icon = isUsers   ? `<i class="fa-solid fa-address-card w-4 h-4 text-blue-500 mr-2"></i>`
+                   : isChild   ? `<i class="fa-solid fa-house-chimney-user w-4 h-4 text-blue-300 mr-2"></i>`
+                   : level ===1 ? `<i class="fa-solid fa-people-group w-4 h-4 text-gray-900 mr-2"></i>`
+                   :              `<i class="fa-solid fa-folder w-4 h-4 text-blue-500 mr-2"></i>`;
+
+        const catForm = (type, catIcon, hover, label) => `
+            <li>
+                <form method="POST" action="/space-content/" class="space-node-form w-full">
+                    <input type="hidden" name="csrfmiddlewaretoken" value="${csrf}">
+                    <input type="hidden" name="space_id" value="${id}">
+                    <input type="hidden" name="space_name" value="${_esc(name)}">
+                    <input type="hidden" name="type" value="${type}">
+                    <button type="submit" class="space-node flex items-center w-full py-1 px-2 rounded ${hover} text-xs text-gray-600 transition-colors">
+                        ${catIcon}<span>${label}</span>
+                    </button>
+                </form>
+            </li>`;
+
+        return `
+            <li class="select-none my-0.5">
+                <details class="group" data-tree-id="${id}">
+                    <summary class="flex items-center py-1.5 px-2 rounded-lg hover:bg-gray-200 cursor-pointer transition-colors text-sm text-gray-700">
+                        <svg class="arrow-icon w-3.5 h-3.5 text-gray-400 mr-2 shrink-0 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                        ${icon}
+                        <span class="truncate font-semibold">${_esc(name)}</span>
+                    </summary>
+                    <ul class="pl-2 border-l border-gray-100 ml-1 mt-1 space-y-0.5">
+                        <li>
+                            <details class="group/jobs"
+                                     data-tree-id="${id}-jobs"
+                                     data-space-id="${id}"
+                                     data-job-folder="true">
+                                <summary class="flex items-center w-full py-1 px-2 rounded hover:bg-orange-50 text-xs text-gray-600 cursor-pointer transition-colors list-none select-none">
+                                    <i class="fa-solid fa-list-check text-orange-400 w-5 text-center mr-1 shrink-0"></i>
+                                    <span class="flex-1">Jobs</span>
+                                    <svg class="arrow-icon w-3 h-3 text-gray-400 ml-1 shrink-0 transition-transform group-open/jobs:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                                    </svg>
+                                </summary>
+                                <ul class="job-nodes-list pl-3 mt-0.5 space-y-0.5 border-l border-orange-100 ml-2.5"></ul>
+                            </details>
+                        </li>
+                        ${catForm('solvers',    '<i class="fa-solid fa-microchip text-purple-400 w-5 text-center mr-1"></i>',  'hover:bg-purple-50', 'Solvers')}
+                        ${catForm('benchmarks', '<i class="fa-solid fa-file-code text-green-400 w-5 text-center mr-1"></i>',  'hover:bg-green-50',  'Problems')}
+                        ${catForm('users',      '<i class="fa-solid fa-users text-blue-400 w-5 text-center mr-1"></i>',       'hover:bg-blue-50',   'Users')}
+                        <li>
+                            <details class="group/sub"
+                                     data-tree-id="${id}-sub"
+                                     data-space-id="${id}"
+                                     data-space-name="${_esc(name)}"
+                                     data-subspace-folder="true">
+                                <summary class="flex items-center w-full py-1 px-2 rounded hover:bg-gray-100 text-xs text-gray-600 cursor-pointer transition-colors list-none select-none">
+                                    <div class="flex items-center flex-grow text-left">
+                                        <i class="fa-regular fa-folder-open text-gray-500 w-5 text-center mr-1"></i>
+                                        <span>Subspaces</span>
+                                    </div>
+                                    <svg class="arrow-icon w-3 h-3 text-gray-400 ml-2 transition-transform group-open/sub:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                                    </svg>
+                                </summary>
+                                <ul class="subspace-nodes-list pl-2 mt-1"></ul>
+                            </details>
+                        </li>
+                    </ul>
+                </details>
+            </li>`;
+    }
+
+    // Fetches direct children of a space and injects them as tree nodes.
+    // After injecting, restores any previously-expanded descendants from localStorage —
+    // setting .open = true fires the toggle listener which cascades further if needed.
+    async function loadSubspaceNodes(spaceId, listEl, parentName) {
+        listEl.innerHTML = `
+            <li class="py-1 px-2 text-gray-400 text-xs flex items-center gap-1.5">
+                <i class="fas fa-circle-notch fa-spin text-[10px]"></i>
+                <span class="animate-pulse">Loading...</span>
+            </li>`;
+
+        const qs  = parentName ? `?parent_name=${encodeURIComponent(parentName)}` : '';
+        try {
+            const resp = await fetch(`/subspaces/for-space/${spaceId}/${qs}`);
+            if (!resp.ok) {
+                const d = await resp.json().catch(() => ({}));
+                throw new Error(d.error || `HTTP ${resp.status}`);
+            }
+            const spaces = await resp.json();
+
+            if (!spaces.length) {
+                listEl.innerHTML = '<li class="py-1 px-2 text-gray-400 text-xs italic">No subspaces.</li>';
+            } else {
+                listEl.innerHTML = spaces.map(s => _renderSpaceNodeHtml(s, 2)).join('');
+
+                // Cascade: re-open any descendants the user had previously expanded.
+                // Each .open = true fires the toggle listener → triggers deeper loads as needed.
+                const expandedIds = getTreeState();
+                if (expandedIds.size) {
+                    listEl.querySelectorAll('[data-tree-id]').forEach(el => {
+                        if (expandedIds.has(el.dataset.treeId)) el.open = true;
+                    });
+                }
+            }
+            listEl.dataset.loaded = 'true';
+        } catch (err) {
+            listEl.innerHTML = `<li class="py-1 px-2 text-red-400 text-xs">${_esc(err.message)}</li>`;
+        }
+    }
+
+    // Fetches jobs for a space and injects individual job nodes into the tree.
+    // Called once per job-folder <details> open (guarded by listEl.dataset.loaded).
+    async function loadJobNodes(spaceId, listEl) {
+        listEl.innerHTML = `
+            <li class="py-1 px-2 text-gray-400 text-xs flex items-center gap-1.5">
+                <i class="fas fa-circle-notch fa-spin text-[10px]"></i>
+                <span class="animate-pulse">Loading...</span>
+            </li>`;
+
+        try {
+            const resp = await fetch(`/jobs/for-space/${spaceId}/`);
+            if (!resp.ok) {
+                const d = await resp.json().catch(() => ({}));
+                throw new Error(d.error || `HTTP ${resp.status}`);
+            }
+            const jobs = await resp.json();
+
+            if (!jobs.length) {
+                listEl.innerHTML = '<li class="py-1 px-2 text-gray-400 text-xs italic">No jobs.</li>';
+            } else {
+                // DOMParser handles nested tags (e.g. <img> inside <a>) that
+                // a regex like >([^<]+)</ would fail to match correctly.
+                const _parser = new DOMParser();
+                listEl.innerHTML = jobs.map(job => {
+                    const doc       = _parser.parseFromString(job.name_html, 'text/html');
+                    const cleanName = doc.querySelector('a')?.textContent?.trim() || `Job ${job.id}`;
+                    return `
+                        <li>
+                            <button
+                                class="job-node-btn w-full flex items-center py-1 px-2 rounded hover:bg-orange-50 text-xs text-gray-600 transition-colors text-left"
+                                data-job-id="${job.id}"
+                                data-job-name="${_esc(cleanName)}"
+                            >
+                                <i class="fa-solid fa-file-lines text-orange-300 w-5 text-center mr-1 shrink-0"></i>
+                                <span class="truncate">${_esc(cleanName)}</span>
+                            </button>
+                        </li>`;
+                }).join('');
+            }
+            listEl.dataset.loaded = 'true';
+        } catch (err) {
+            listEl.innerHTML = `<li class="py-1 px-2 text-red-400 text-xs">${_esc(err.message)}</li>`;
+        }
+    }
+
+    // Renders job details (stat grid + lazy pairs accordion) in the right-side
+    // content panel — identical data to the modal but no overlay.
+    async function openJobInContent(jobId, jobName) {
+        history.replaceState({}, '', `?job_id=${jobId}`);
+        lastActiveForm = null;
+
+        contentTitle.textContent = jobName || `Job ${jobId}`;
+        contentArea.classList.remove('border-dashed', 'items-center', 'justify-center', 'p-8');
+        contentArea.classList.add('p-0');
+        downloadButtonContainer.innerHTML = `
+            <a href="/jobs/${jobId}/" target="_blank"
+               class="inline-flex items-center px-4 py-2 border border-blue-600 text-sm font-medium rounded-xl shadow-lg text-blue-600 bg-white hover:bg-gray-50 transition duration-150 transform hover:scale-[1.01]">
+                <i class="fas fa-external-link-alt mr-2"></i>Open Full Page
+            </a>`;
+        downloadButtonContainer.classList.remove('hidden');
+
+        contentArea.innerHTML = `
+            <div class="flex items-center justify-center py-16 text-gray-400 min-h-[400px]">
+                <i class="fas fa-circle-notch fa-spin text-2xl mr-3 text-blue-400"></i>
+                <span>Loading job details...</span>
+            </div>`;
+
+        // Fire details + spaces waterfall in parallel — same as openJobModal.
+        const detailsPromise = fetch(`/jobs/${jobId}/json/`)
+            .then(r => r.ok ? r.json() : r.json().then(d => { throw new Error(d.error || `HTTP ${r.status}`); }));
+        const pairsPromise = _fetchJobSpaces(jobId);
+
+        let job;
+        try {
+            job = await detailsPromise;
+        } catch (err) {
+            contentTitle.textContent = `Job ${jobId}`;
+            contentArea.innerHTML = `
+                <div class="flex flex-col items-center justify-center py-16 text-red-500 min-h-[400px]">
+                    <i class="fas fa-exclamation-circle text-4xl mb-3"></i>
+                    <p class="text-sm font-medium">Could not load job: ${_esc(err.message)}</p>
+                </div>`;
+            return;
+        }
+
+        const stage     = _stage(job);
+        const name      = job.name ?? `Job ${jobId}`;
+        const desc      = job.description || '';
+        const status    = _jobStatus(job);
+        const owner     = job.userId     != null ? String(job.userId)           : 'none';
+        const framework = job.benchmarkingFramework                             ?? 'none';
+        const created   = _formatJobDate(job.createTime);
+        const postProc  = stage.postProcessor?.name                             ?? 'none';
+        const queue     = job.queue?.name                                       ?? 'none';
+        const wallclock = stage.wallclockTimeout ?? job.wallclockTimeout ?? null;
+        const cpu       = stage.cpuTimeout       ?? job.cpuTimeout       ?? null;
+        const memory    = job.maxMemory != null ? (job.maxMemory / 1073741824).toFixed(1) + ' GB' : 'none';
+        const disk      = job.diskSize  != null ? (job.diskSize  / 1073741824).toFixed(2) + ' GB' : 'none';
+
+        contentTitle.textContent = name;
+
+        const PAIRS_ID = `job-pairs-${jobId}`;
+        contentArea.innerHTML = `
+            <div class="p-6 sm:p-8">
+                ${desc ? `<p class="text-gray-500 text-sm mb-5">${_esc(desc)}</p>` : ''}
+                <dl class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    ${_statCard('Status',                 _esc(status))}
+                    ${_statCard('Owner',                  _esc(owner))}
+                    ${_statCard('Queue',                  _esc(queue))}
+                    ${_statCard('Benchmarking Framework', _esc(framework))}
+                    ${_statCard('Postprocessor',          _esc(postProc))}
+                    ${_statCard('Created',                _esc(created))}
+                    ${_statCard('CPU Timeout',       cpu       != null ? _esc(String(cpu))       + ' s' : 'none')}
+                    ${_statCard('Wallclock Timeout', wallclock != null ? _esc(String(wallclock)) + ' s' : 'none')}
+                    ${_statCard('Max Memory',             _esc(memory))}
+                    ${_statCard('Disk Usage',             _esc(disk))}
+                </dl>
+                <div class="mt-8 border-t border-gray-200 pt-6">
+                    <h3 class="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">Job Pairs</h3>
+                    <div id="${PAIRS_ID}" class="flex items-center gap-2 text-gray-400 text-sm py-2">
+                        <i class="fas fa-circle-notch fa-spin"></i>
+                        Loading Job Pairs...
+                    </div>
+                </div>
+            </div>`;
+
+        const pairsEl = () => document.getElementById(PAIRS_ID);
+        try {
+            const spaces = await pairsPromise;
+            if (pairsEl()) pairsEl().outerHTML = `<div id="${PAIRS_ID}">${_renderSpacesList(spaces)}</div>`;
+        } catch (err) {
+            if (pairsEl()) pairsEl().innerHTML = `
+                <div class="flex items-center gap-2 text-red-400 text-sm">
+                    <i class="fas fa-exclamation-circle"></i>
+                    Could not load job pairs: ${_esc(err.message)}
+                </div>`;
+        }
+    }
+
     async function loadSpaceContent(form) {
         lastActiveForm = form;
         const clickedButton = form.querySelector('.space-node');
@@ -823,18 +1101,79 @@
             });
         }
 
-        // Restore the active space content from URL params (deep-link / reload persistence).
-        // Uses the existing AJAX path — no backend change required.
+        // Restore the active view from URL params (deep-link / reload persistence).
         const params     = new URLSearchParams(window.location.search);
+        const urlJobId   = params.get('job_id');
         const urlSpaceId = params.get('space_id');
         const urlType    = params.get('type');
-        if (urlSpaceId && urlType) {
+        if (urlJobId) {
+            // Job-detail view — open directly in the content panel.
+            openJobInContent(parseInt(urlJobId, 10));
+        } else if (urlSpaceId && urlType) {
+            // Space-content view — find the form in the rendered tree and re-fire it.
             const form = findSpaceForm(urlSpaceId, urlType);
             if (form) {
-                expandAncestors(form);   // ensure the node is visible in the tree
+                expandAncestors(form);
                 loadSpaceContent(form);
             }
         }
+
+        // --- Sidebar: job-node clicks → render in content panel (no modal) ---
+        document.getElementById('spaces-sidebar').addEventListener('click', function(e) {
+            const btn = e.target.closest('.job-node-btn');
+            if (!btn) return;
+            const jobId   = parseInt(btn.dataset.jobId, 10);
+            const jobName = btn.dataset.jobName || '';
+            if (!jobId) return;
+
+            if (selectedNode) selectedNode.classList.remove('selected-node');
+            btn.classList.add('selected-node');
+            selectedNode = btn;
+
+            openJobInContent(jobId, jobName);
+        });
+
+        // --- contentArea: pair accordion clicks in job-detail-in-content view ---
+        contentArea.addEventListener('click', async function(e) {
+            const header  = e.target.closest('.pair-space-header');
+            if (!header) return;
+
+            const row     = header.closest('.pair-space-row');
+            const detail  = row?.querySelector('.pair-space-detail');
+            const arrow   = header.querySelector('.arrow-icon');
+            const spaceId = parseInt(header.dataset.spaceId, 10);
+            if (!detail || !spaceId) return;
+
+            if (!detail.classList.contains('hidden')) {
+                detail.classList.add('hidden');
+                arrow?.classList.remove('rotate-90');
+                return;
+            }
+            detail.classList.remove('hidden');
+            arrow?.classList.add('rotate-90');
+
+            if (detail.dataset.loaded === 'true') return;
+
+            detail.innerHTML = `
+                <div class="flex items-center gap-2 text-gray-400 text-sm px-4 py-3">
+                    <i class="fas fa-circle-notch fa-spin text-xs"></i>
+                    <span class="animate-pulse">Loading data from StarExec...</span>
+                </div>`;
+
+            try {
+                const rows = await _fetchSpacePairs(spaceId);
+                detail.innerHTML = _renderPairRows(rows);
+                detail.dataset.loaded = 'true';
+                const hint = header.querySelector('span.ml-auto');
+                if (hint) hint.textContent = `${rows.length} pair${rows.length !== 1 ? 's' : ''}`;
+            } catch (err) {
+                detail.innerHTML = `
+                    <div class="flex items-center gap-2 text-red-400 text-sm px-4 py-3">
+                        <i class="fas fa-exclamation-circle"></i>
+                        ${_esc(err.message)}
+                    </div>`;
+            }
+        });
 
         // --- Lazy-load event delegation for Job Pair accordion rows ---
         // Attached once to the stable #modal-content element; handles all

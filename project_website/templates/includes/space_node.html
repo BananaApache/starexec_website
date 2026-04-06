@@ -26,19 +26,23 @@
         {# REDUCED INDENTATION: pl-2 ml-1 (was pl-6 ml-3) #}
         <ul class="pl-2 border-l border-gray-100 ml-1 mt-1 space-y-0.5">
             
-            {# Category: Jobs #}
+            {# Category: Jobs (lazy-loaded individual job nodes) #}
             <li>
-                <form method="POST" action="{% url 'get_space_content' %}" class="space-node-form w-full">
-                    {% csrf_token %}
-                    <input type="hidden" name="space_id" value="{{ space.attr.id }}">
-                    <input type="hidden" name="space_name" value="{{ space.data }}">
-                    <input type="hidden" name="type" value="jobs">
-                    
-                    <button type="submit" class="space-node flex items-center w-full py-1 px-2 rounded hover:bg-orange-50 text-xs text-gray-600 transition-colors">
-                        <i class="fa-solid fa-list-check text-orange-400 w-5 text-center mr-1"></i>
-                        <span>Jobs</span>
-                    </button>
-                </form>
+                <details class="group/jobs"
+                         data-tree-id="{{ space.attr.id }}-jobs"
+                         data-space-id="{{ space.attr.id }}"
+                         data-job-folder="true">
+                    <summary class="flex items-center w-full py-1 px-2 rounded hover:bg-orange-50 text-xs text-gray-600 cursor-pointer transition-colors list-none select-none">
+                        <i class="fa-solid fa-list-check text-orange-400 w-5 text-center mr-1 shrink-0"></i>
+                        <span class="flex-1">Jobs</span>
+                        <svg class="arrow-icon w-3 h-3 text-gray-400 ml-1 shrink-0 transition-transform group-open/jobs:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                    </summary>
+                    <ul class="job-nodes-list pl-3 mt-0.5 space-y-0.5 border-l border-orange-100 ml-2.5">
+                        {# Populated by JS on first open #}
+                    </ul>
+                </details>
             </li>
 
             {# Category: Solvers #}
@@ -86,36 +90,25 @@
                 </form>
             </li>
 
-            {# Category: Subfolders (Recursive Parent) #}
+            {# Category: Subspaces (lazy-loaded via JS, same pattern as Jobs) #}
             <li>
-                <details class="group/sub" data-tree-id="{{ space.attr.id }}-sub">
-                    {# REMOVED FORM SUBMISSION - Just a Toggle #}
+                <details class="group/sub"
+                         data-tree-id="{{ space.attr.id }}-sub"
+                         data-space-id="{{ space.attr.id }}"
+                         data-space-name="{{ space.data }}"
+                         data-subspace-folder="true">
                     <summary class="flex items-center w-full py-1 px-2 rounded hover:bg-gray-100 text-xs text-gray-600 cursor-pointer transition-colors list-none select-none">
                         <div class="flex items-center flex-grow text-left">
                             <i class="fa-regular fa-folder-open text-gray-500 w-5 text-center mr-1"></i>
                             <span>Subspaces</span>
-                            {% if space.children %}
-                                <span class="ml-auto text-[10px] bg-gray-200 px-1.5 rounded-full text-gray-500">{{ space.children|length }}</span>
-                            {% endif %}
                         </div>
-                        
-                        {# Toggle arrow for subfolder tree #}
-                        {% if space.children %}
-                             <svg class="arrow-icon w-3 h-3 text-gray-400 ml-2 transition-transform group-open/sub:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                            </svg>
-                        {% endif %}
+                        <svg class="arrow-icon w-3 h-3 text-gray-400 ml-2 transition-transform group-open/sub:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
                     </summary>
-
-                    {# Recursive Children #}
-                    {% if space.children %}
-                        {# REDUCED INDENTATION: pl-2 #}
-                        <ul class="pl-2 mt-1">
-                            {% for child in space.children %}
-                                {% include "includes/space_node.html" with space=child %}
-                            {% endfor %}
-                        </ul>
-                    {% endif %}
+                    <ul class="subspace-nodes-list pl-2 mt-1">
+                        {# Populated by JS on first open #}
+                    </ul>
                 </details>
             </li>
 

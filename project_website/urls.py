@@ -24,8 +24,10 @@ urlpatterns = [
         views.download_space_xml_file,
         name="download_space_xml",
     ),
-    # Job routes
+    # Space / Job lazy-load routes
+    path("subspaces/for-space/<int:space_id>/", views.get_subspace_children, name="get_subspace_children"),
     path("jobs/create/", views.create_job, name="create_job"),
+    path("jobs/for-space/<int:space_id>/", views.get_space_jobs, name="get_space_jobs"),
     path("jobs/<int:job_id>/", views.job_detail, name="job_detail"),
     path("jobs/<int:job_id>/json/", views.get_job_json, name="job_json"),
     path("api/proxy/", views.proxy_api, name="proxy_api"),

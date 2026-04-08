@@ -58,6 +58,17 @@
             pointer-events: auto;
         }
         
+        /* Matrix: pulse on unloaded rows, orange flash when a cell gets live data */
+        .matrix-row-loading td:not(:first-child) {
+            animation: matrix-pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes matrix-pulse { 0%,100% { opacity:.5; } 50% { opacity:.15; } }
+        @keyframes cell-flash {
+            0%   { outline: 2px solid #fb923c; outline-offset: -2px; }
+            100% { outline: none; }
+        }
+        .cell-just-updated { animation: cell-flash 0.8s ease-out forwards; }
+
         /* Fade in animation for modal */
         @keyframes fadeIn {
             from { opacity: 0; transform: scale(0.95); }
@@ -505,6 +516,185 @@
             </div>`).join('');
     }
 
+    // Extract plain text from an HTML string (cleans solver/benchmark names).
+    function _parseText(html) {
+        try {
+            return new DOMParser().parseFromString(String(html), 'text/html')
+                       .body.textContent?.trim() || String(html);
+        } catch (_) { return String(html); }
+    }
+
+    // Fetch up to 1000 pairs for one job-space (no per-space cache — used for matrix).
+    function _fetchAllPairs(spaceId) {
+        const body = new URLSearchParams({
+            sEcho: '1', iDisplayStart: '0', iDisplayLength: '1000', iSortCol_0: '0',
+        });
+        return _apiFetch(
+            `/starexec/services/jobs/solvers/pagination/${spaceId}/true/true/1/false`,
+            { method: 'POST', body }
+        ).then(d => d?.aaData ?? []);
+    }
+
+    // Concurrency-limited promise pool: runs at most `limit` tasks simultaneously.
+    async function _promisePool(tasks, limit) {
+        let i = 0;
+        const worker = async () => {
+            while (i < tasks.length) { await tasks[i++]().catch(() => {}); }
+        };
+        await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+    }
+
+    // Fetch all domain data and build the solver×domain matrix.
+    // Phase 1 (sequential): fetches spaces one-by-one until one has data, establishing
+    //   the solver column headers. Calls onSkeleton(html) with partial data immediately.
+    // Phase 2 (pooled): fetches all remaining spaces at most CONCURRENCY=4 at a time.
+    // Returns { domains, solvers, data } when fully resolved.
+    async function _buildMatrix(jobId, onSkeleton) {
+        const CONCURRENCY = 4;
+        const solverSet = new Set();
+        const data = new Map();  // spaceName → Map(solverName → ratio string, e.g. "71/77")
+
+        // Each aaData row is one solver's summary for this domain:
+        //   row[2] = solver name (may contain HTML)
+        //   row[4] = ratio string already computed by StarExec, e.g. "71/77"
+        const processRows = (spaceName, rows) => {
+            const domainMap = new Map();
+            rows.forEach(row => {
+                const solver = _parseText(String(row[2] ?? ''));
+                const ratio  = _parseText(String(row[4] ?? '')).trim();
+                if (!solver) return;
+                solverSet.add(solver);
+                console.log(`[matrix] domain="${spaceName}" solver="${solver}" ratio="${ratio}"`);
+                domainMap.set(solver, ratio);
+            });
+            data.set(spaceName, domainMap);
+        };
+
+        const domains = await _fetchJobSpaces(jobId);
+        if (!domains.length) return { domains: [], solvers: [], data };
+
+        // Phase 1: sequential anchor — walk spaces until one returns data.
+        // Spaces visited before the anchor are also processed (they were empty).
+        let anchorIdx = -1;
+        for (let i = 0; i < domains.length; i++) {
+            const rows = await _fetchAllPairs(domains[i].spaceId).catch(() => []);
+            processRows(domains[i].spaceName, rows);
+            if (rows.length) { anchorIdx = i; break; }
+        }
+
+        // Emit skeleton immediately once column headers are known.
+        if (typeof onSkeleton === 'function') {
+            const partialSolvers = [...solverSet].sort((a, b) => a.localeCompare(b));
+            onSkeleton(_renderMatrix({ domains, solvers: partialSolvers, data, matrixId: jobId }));
+        }
+
+        // Live-patch one domain row in the already-rendered skeleton table.
+        // Finds each <td data-solver-cell="..."> by solver name — order-independent.
+        const _patchRow = (spaceName) => {
+            const table = document.querySelector(`table[data-matrix-job="${jobId}"]`);
+            if (!table) return;  // skeleton not yet in DOM (details hadn't resolved) — final render covers it
+            const domRow = table.querySelector(`tr[data-domain-row="${spaceName.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`);
+            if (!domRow) return;
+            const domainMap = data.get(spaceName);
+            domainMap.forEach((ratio, solver) => {
+                const cell = domRow.querySelector(`td[data-solver-cell="${solver.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`);
+                if (!cell) {
+                    console.warn(`[matrix] solver "${solver}" (domain "${spaceName}") not found in table headers — possible name mismatch`);
+                    return;
+                }
+                cell.setAttribute('style', `${_cellStyle(ratio)} padding:5px 8px; text-align:center; font-size:11px; border-left:1px solid #f3f4f6;`);
+                cell.textContent = ratio;
+                cell.classList.add('cell-just-updated');
+                cell.addEventListener('animationend', () => cell.classList.remove('cell-just-updated'), { once: true });
+            });
+            domRow.classList.remove('matrix-row-loading');
+        };
+
+        // Phase 2: pooled fetch for all spaces not yet visited.
+        const processedUntil = anchorIdx === -1 ? domains.length : anchorIdx + 1;
+        await _promisePool(
+            domains.slice(processedUntil).map(({ spaceId, spaceName }) => async () => {
+                const rows = await _fetchAllPairs(spaceId).catch(() => []);
+                processRows(spaceName, rows);
+                _patchRow(spaceName);
+            }),
+            CONCURRENCY
+        );
+
+        const solvers = [...solverSet].sort((a, b) => a.localeCompare(b));
+        return { domains, solvers, data };
+    }
+
+    // Parses a StarExec "X/Y" ratio string and returns an inline style string for the heatmap cell.
+    // Hoisted to module scope so _buildMatrix can reuse it for live DOM updates.
+    function _cellStyle(ratio) {
+        const m = ratio.match(/^(\d+)\/(\d+)$/);
+        if (!m || +m[2] === 0) return 'background:#f9fafb; color:#9ca3af;';
+        const p = +m[1] / +m[2];
+        if (p >= 0.75) return 'background:#d1fae5; font-weight:600;';
+        if (p >= 0.25) return 'background:#fef9c3;';
+        if (p >  0)    return 'background:#fee2e2;';
+        return 'background:#f9fafb; color:#9ca3af;';
+    }
+
+    // Renders the solver×domain matrix table with sticky headers and heatmap cells.
+    // matrixId  — optional string added as data-matrix-job on the <table> so Phase 2
+    //             live updates can locate the table for in-place cell patching.
+    function _renderMatrix({ domains, solvers, data, matrixId = '' }) {
+        if (!domains.length)
+            return '<p class="text-gray-400 text-sm py-2 italic">No job pairs found.</p>';
+        if (!solvers.length)
+            return '<p class="text-gray-400 text-sm py-2 italic">No solver data available.</p>';
+
+        const TH_BASE  = 'padding:5px 8px; font-size:11px; font-weight:500; color:#6b7280; text-transform:uppercase; letter-spacing:.04em; white-space:nowrap; text-align:center;';
+        const TD_STICK = 'padding:5px 10px; font-size:11px; font-weight:600; color:#374151; white-space:nowrap; position:sticky; left:0; background:#fff; border-right:1px solid #e5e7eb; z-index:10;';
+        const CELL_BASE = 'padding:5px 8px; text-align:center; font-size:11px; border-left:1px solid #f3f4f6;';
+
+        const headerCells = solvers.map(s =>
+            `<th scope="col" data-solver-col="${_esc(s)}" style="${TH_BASE}"><div style="max-width:100px; overflow:hidden; text-overflow:ellipsis;" title="${_esc(s)}">${_esc(s)}</div></th>`
+        ).join('');
+
+        const LOADING_CELL = `<td style="${CELL_BASE}"><i class="fas fa-circle-notch fa-spin" style="font-size:9px; color:#d1d5db;"></i></td>`;
+
+        const bodyRows = domains.map(({ spaceName }) => {
+            if (!data.has(spaceName)) {
+                // Not yet fetched — pulsing spinner cells; class triggers CSS animation.
+                return `<tr class="matrix-row-loading" data-domain-row="${_esc(spaceName)}" style="border-bottom:1px solid #f3f4f6;">
+                    <td style="${TD_STICK}">${_esc(spaceName)}</td>${solvers.map(s => `<td data-solver-cell="${_esc(s)}" style="${CELL_BASE}"><i class="fas fa-circle-notch fa-spin" style="font-size:9px; color:#d1d5db;"></i></td>`).join('')}
+                </tr>`;
+            }
+            const domainMap = data.get(spaceName);
+            const cells = solvers.map(s => {
+                const ratio = domainMap.get(s);
+                if (!ratio) return `<td data-solver-cell="${_esc(s)}" style="${CELL_BASE} color:#d1d5db;">—</td>`;
+                return `<td data-solver-cell="${_esc(s)}" style="${_cellStyle(ratio)} ${CELL_BASE}">${_esc(ratio)}</td>`;
+            }).join('');
+            return `<tr data-domain-row="${_esc(spaceName)}" style="border-bottom:1px solid #f3f4f6; transition:background .1s;" onmouseover="this.style.background='#fffbeb'" onmouseout="this.style.background=''">
+                <td style="${TD_STICK}">${_esc(spaceName)}</td>${cells}
+            </tr>`;
+        }).join('');
+
+        const matrixAttr = matrixId ? ` data-matrix-job="${_esc(String(matrixId))}"` : '';
+        return `
+            <div style="overflow-x:auto; border:1px solid #e5e7eb; border-radius:8px; font-family:inherit;">
+                <table${matrixAttr} style="min-width:100%; border-collapse:collapse;">
+                    <thead style="background:#f9fafb; border-bottom:2px solid #e5e7eb; position:sticky; top:0; z-index:20;">
+                        <tr>
+                            <th scope="col" style="${TH_BASE} text-align:left; position:sticky; left:0; background:#f9fafb; border-right:1px solid #e5e7eb; z-index:30;">Domain&nbsp;╲&nbsp;Solver</th>
+                            ${headerCells}
+                        </tr>
+                    </thead>
+                    <tbody>${bodyRows}</tbody>
+                </table>
+            </div>
+            <p style="font-size:11px; color:#9ca3af; margin-top:6px;">
+                Cells show <em>solved / total</em> pairs.
+                <span style="background:#d1fae5; padding:1px 5px; border-radius:3px; font-weight:600;">≥75%</span>
+                <span style="background:#fef9c3; padding:1px 5px; border-radius:3px;">25–74%</span>
+                <span style="background:#fee2e2; padding:1px 5px; border-radius:3px;">&lt;25%</span>
+            </p>`;
+    }
+
     // Renders the Tier 2 table that drops into an expanded accordion row.
     function _renderPairRows(rows) {
         if (!rows.length) {
@@ -555,7 +745,12 @@
         const detailsPromise = fetch(`/jobs/${jobId}/json/`)
             .then(r => r.ok ? r.json() : r.json().then(d => { throw new Error(d.error || `HTTP ${r.status}`); }));
 
-        const pairsPromise = _fetchJobSpaces(jobId);
+        const pairsPromise = _buildMatrix(jobId, (skeleton) => {
+            // Fires as soon as the anchor space resolves — renders the table skeleton
+            // with solver headers + spinner rows for unvisited domains.
+            const el = document.getElementById(`job-pairs-${jobId}`);
+            if (_modalOpen && el) el.outerHTML = `<div id="job-pairs-${jobId}">${skeleton}</div>`;
+        });
 
         // Render stat cards as soon as details arrive (don't wait for pairs).
         let job;
@@ -614,8 +809,8 @@
         // Update only the pairs container once that fetch resolves.
         const pairsEl = () => document.getElementById(PAIRS_ID);
         try {
-            const spaces = await pairsPromise;
-            if (_modalOpen && pairsEl()) pairsEl().outerHTML = `<div id="${PAIRS_ID}">${_renderSpacesList(spaces)}</div>`;
+            const matrix = await pairsPromise;
+            if (_modalOpen && pairsEl()) pairsEl().outerHTML = `<div id="${PAIRS_ID}">${_renderMatrix({ ...matrix, matrixId: jobId })}</div>`;
         } catch (err) {
             if (_modalOpen && pairsEl()) pairsEl().innerHTML = `
                 <div class="flex items-center gap-2 text-red-400 text-sm">
@@ -982,10 +1177,15 @@
                 <span>Loading job details...</span>
             </div>`;
 
-        // Fire details + spaces waterfall in parallel — same as openJobModal.
+        // Fire details + matrix build in parallel — same as openJobModal.
         const detailsPromise = fetch(`/jobs/${jobId}/json/`)
             .then(r => r.ok ? r.json() : r.json().then(d => { throw new Error(d.error || `HTTP ${r.status}`); }));
-        const pairsPromise = _fetchJobSpaces(jobId);
+        const pairsPromise = _buildMatrix(jobId, (skeleton) => {
+            // Fires as soon as the anchor space resolves — may already have a DOM target
+            // if detailsPromise resolved first; otherwise this is a no-op (full render follows).
+            const el = document.getElementById(`job-pairs-${jobId}`);
+            if (el) el.outerHTML = `<div id="job-pairs-${jobId}">${skeleton}</div>`;
+        });
 
         let job;
         try {
@@ -1043,8 +1243,8 @@
 
         const pairsEl = () => document.getElementById(PAIRS_ID);
         try {
-            const spaces = await pairsPromise;
-            if (pairsEl()) pairsEl().outerHTML = `<div id="${PAIRS_ID}">${_renderSpacesList(spaces)}</div>`;
+            const matrix = await pairsPromise;
+            if (pairsEl()) pairsEl().outerHTML = `<div id="${PAIRS_ID}">${_renderMatrix({ ...matrix, matrixId: jobId })}</div>`;
         } catch (err) {
             if (pairsEl()) pairsEl().innerHTML = `
                 <div class="flex items-center gap-2 text-red-400 text-sm">

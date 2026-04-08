@@ -118,7 +118,7 @@
                 <section id="content-panel" class="w-full md:w-2/3 p-8 bg-white/40 relative overflow-y-auto max-h-[80vh]">
                     <h3 id="content-title" class="text-2xl font-bold text-gray-900 mb-6">Content</h3>
                     <div id="download-button-container" class="mb-6 hidden flex flex-wrap gap-4"></div> 
-                    <div id="content-area" class="flex flex-col items-center justify-center h-full text-gray-400 border-2 border-dashed border-gray-300/50 rounded-xl min-h-[400px] p-8">
+                    <div id="content-area" class="flex flex-col items-center justify-center text-gray-400 border-2 border-dashed border-gray-300/50 rounded-xl min-h-[400px] p-8">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mb-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                         </svg>
@@ -547,6 +547,11 @@
         } catch (_) { return String(html); }
     }
 
+    // Normalise a solver name for fuzzy matching (lowercase, strip non-alphanumeric).
+    function normalizeName(str) {
+        return String(str).toLowerCase().replace(/[^a-z0-9]/g, '');
+    }
+
     // Fetch up to 1000 pairs for one job-space (no per-space cache — used for matrix).
     function _fetchAllPairs(spaceId) {
         const body = new URLSearchParams({
@@ -567,6 +572,8 @@
         await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
     }
 
+    const solverIdMap = new Map();  // normalizeName(solverName) → StarExec solver ID string
+    
     // Fetch all domain data and build the solver×domain matrix.
     // Phase 1 (sequential): fetches spaces one-by-one until one has data, establishing
     //   the solver column headers. Calls onSkeleton(html) with partial data immediately.
@@ -574,20 +581,26 @@
     // Returns { domains, solvers, data } when fully resolved.
     async function _buildMatrix(jobId, onSkeleton) {
         const CONCURRENCY = 4;
+        solverIdMap.clear();  // reset for this job — map is global
         const solverSet = new Set();
         const data = new Map();  // spaceName → Map(solverName → ratio string, e.g. "71/77")
 
         // Each aaData row is one solver's summary for this domain:
-        //   row[2] = solver name (may contain HTML)
+        //   row[0] = solver ID (integer)
+        //   row[2] = solver name (plain string)
         //   row[4] = ratio string already computed by StarExec, e.g. "71/77"
         const processRows = (spaceName, rows) => {
             const domainMap = new Map();
             rows.forEach(row => {
-                const solver = _parseText(String(row[2] ?? ''));
-                const ratio  = _parseText(String(row[4] ?? '')).trim();
+                const solverId = String(row[0] ?? '').trim();
+                const solver   = String(row[2] ?? '').trim();
+                const ratio    = _parseText(String(row[4] ?? '')).trim();
                 if (!solver) return;
+                if (solverId) {
+                    const norm = normalizeName(solver);
+                    if (!solverIdMap.has(norm)) solverIdMap.set(norm, solverId);
+                }
                 solverSet.add(solver);
-                console.log(`[matrix] domain="${spaceName}" solver="${solver}" ratio="${ratio}"`);
                 domainMap.set(solver, ratio);
             });
             data.set(spaceName, domainMap);
@@ -640,10 +653,12 @@
                 const rows = await _fetchAllPairs(spaceId).catch(() => []);
                 processRows(spaceName, rows);
                 _patchRow(spaceName);
+                _patchHeaders();  // inject buttons for any newly-discovered solver IDs
             }),
             CONCURRENCY
         );
 
+        _patchHeaders();  // final pass — ensures all headers have buttons
         const solvers = [...solverSet].sort((a, b) => a.localeCompare(b));
         return { domains, solvers, data };
     }
@@ -664,6 +679,7 @@
     // matrixId  — optional string added as data-matrix-job on the <table> so Phase 2
     //             live updates can locate the table for in-place cell patching.
     function _renderMatrix({ domains, solvers, data, matrixId = '' }) {
+        // solverIdMap is global — populated by _buildMatrix.processRows
         if (!domains.length)
             return '<p class="text-gray-400 text-sm py-2 italic">No job pairs found.</p>';
         if (!solvers.length)
@@ -672,10 +688,21 @@
         const TH_BASE  = 'padding:5px 8px; font-size:11px; font-weight:500; color:#6b7280; text-transform:uppercase; letter-spacing:.04em; white-space:nowrap; text-align:center;';
         const TD_STICK = 'padding:5px 10px; font-size:11px; font-weight:600; color:#374151; white-space:nowrap; position:sticky; left:0; background:#fff; border-right:1px solid #e5e7eb; z-index:10;';
         const CELL_BASE = 'padding:5px 8px; text-align:center; font-size:11px; border-left:1px solid #f3f4f6;';
+        const COL_BTN  = 'all:unset; cursor:pointer; display:block; text-align:center; color:inherit; text-decoration:underline; text-decoration-color:#d1d5db; text-underline-offset:2px;';
 
-        const headerCells = solvers.map(s =>
-            `<th scope="col" data-solver-col="${_esc(s)}" style="${TH_BASE}"><div style="max-width:100px; overflow:hidden; text-overflow:ellipsis;" title="${_esc(s)}">${_esc(s)}</div></th>`
-        ).join('');
+        console.log('[matrix] Rendering matrix. Map size:', solverIdMap.size);
+        const headerCells = solvers.map(s => {
+            const solverId = solverIdMap.get(normalizeName(s));
+            const inner = `<div style="max-width:100px; overflow:hidden; text-overflow:ellipsis;" title="${_esc(s)}">${_esc(s)}</div>`;
+            if (solverId) {
+                console.log('[matrix] Found ID for ' + s + ': ' + solverId);
+                return `<th scope="col" data-solver-col="${_esc(s)}" style="${TH_BASE}">
+                    <button class="solver-col-btn" style="${COL_BTN}" data-solver-id="${_esc(solverId)}" data-solver-name="${_esc(s)}">${inner}</button>
+                </th>`;
+            }
+            console.warn('[matrix] No ID for solver: ' + s + ' (norm: ' + normalizeName(s) + ')');
+            return `<th scope="col" data-solver-col="${_esc(s)}" style="${TH_BASE}">${inner}</th>`;
+        }).join('');
 
         const LOADING_CELL = `<td style="${CELL_BASE}"><i class="fas fa-circle-notch fa-spin" style="font-size:9px; color:#d1d5db;"></i></td>`;
 
@@ -718,6 +745,23 @@
                 <span style="background:#fef9c3; padding:1px 5px; border-radius:3px;">25–74%</span>
                 <span style="background:#fee2e2; padding:1px 5px; border-radius:3px;">&lt;25%</span>
             </p>`;
+    }
+
+    // Injects solver-col-btn buttons into any <th data-solver-col> in all visible matrix
+    // tables that don't already have one. Uses the global solverIdMap. Safe to call repeatedly.
+    const _PATCH_BTN = 'all:unset; cursor:pointer; display:block; width:100%; text-decoration:underline; text-decoration-color:#d1d5db; text-underline-offset:2px;';
+    function _patchHeaders() {
+        if (!solverIdMap.size) return;
+        let patched = 0;
+        document.querySelectorAll('table[data-matrix-job] th[data-solver-col]').forEach(th => {
+            if (th.querySelector('.solver-col-btn')) return;  // already has button
+            const solverName = th.dataset.solverCol;
+            const solverId   = solverIdMap.get(normalizeName(solverName));
+            if (!solverId) return;
+            th.innerHTML = `<button class="solver-col-btn" style="${_PATCH_BTN}" data-solver-id="${_esc(solverId)}" data-solver-name="${_esc(solverName)}">${th.innerHTML}</button>`;
+            patched++;
+        });
+        if (patched) console.log(`[matrix] _patchHeaders patched ${patched} header(s)`);
     }
 
     // Renders the Tier 2 table that drops into an expanded accordion row.
@@ -835,7 +879,10 @@
         const pairsEl = () => document.getElementById(PAIRS_ID);
         try {
             const matrix = await pairsPromise;
-            if (_modalOpen && pairsEl()) pairsEl().outerHTML = `<div id="${PAIRS_ID}">${_renderMatrix({ ...matrix, matrixId: jobId })}</div>`;
+            if (_modalOpen && pairsEl()) {
+                pairsEl().outerHTML = `<div id="${PAIRS_ID}">${_renderMatrix({ ...matrix, matrixId: jobId })}</div>`;
+                _patchHeaders();
+            }
         } catch (err) {
             if (_modalOpen && pairsEl()) pairsEl().innerHTML = `
                 <div class="flex items-center gap-2 text-red-400 text-sm">
@@ -1269,7 +1316,10 @@
         const pairsEl = () => document.getElementById(PAIRS_ID);
         try {
             const matrix = await pairsPromise;
-            if (pairsEl()) pairsEl().outerHTML = `<div id="${PAIRS_ID}">${_renderMatrix({ ...matrix, matrixId: jobId })}</div>`;
+            if (pairsEl()) {
+                pairsEl().outerHTML = `<div id="${PAIRS_ID}">${_renderMatrix({ ...matrix, matrixId: jobId })}</div>`;
+                _patchHeaders();
+            }
         } catch (err) {
             if (pairsEl()) pairsEl().innerHTML = `
                 <div class="flex items-center gap-2 text-red-400 text-sm">
@@ -1656,6 +1706,12 @@
     let _jpParsedRows = [];   // [{benchHref, benchName, solverName, …}, …]
     let _jpSortCol    = -1;   // index into JP_COLS, -1 = unsorted (insertion order)
     let _jpSortDir    = 'asc';
+    // Server-side pagination state — reset on each new modal open.
+    let _jpUrl    = '';
+    let _jpStart  = 0;
+    let _jpTotal  = 0;
+    let _jpSearch = '';
+    const _jpSize = 500;
 
     // Comparator used by sort: numeric cols parse as float, others use localeCompare.
     function _jpCompare(a, b, colIdx, dir) {
@@ -1740,13 +1796,77 @@
         tbody.replaceChildren(frag);
     }
 
-    async function _openJobPairsModal(jobSpaceId, domainName) {
-        // Reset sort state for each new open.
-        _jpParsedRows = [];
+    // Converts a raw aaData row array into clean display objects.
+    function _jpParseRows(rawRows) {
+        return rawRows.map(row => ({
+            benchHref:  _extractHref(String(row[0] ?? '')),
+            benchName:  _extractText(String(row[0] ?? '')) || '—',
+            solverName: _extractText(String(row[1] ?? '')) || '—',
+            configName: _extractText(String(row[2] ?? '')) || '—',
+            status:     _extractText(String(row[3] ?? '')) || '—',
+            wallclock:  _extractText(String(row[4] ?? '')) || '—',
+            result:     _extractText(String(row[5] ?? '')) || '—',
+        }));
+    }
+
+    // Syncs the range label and Prev/Next button states to the current _jp* state.
+    function _jpUpdatePagination() {
+        const rangeEl = _jobPairsModalBody.querySelector('[data-jp-range]');
+        const prevBtn = _jobPairsModalBody.querySelector('[data-jp-prev]');
+        const nextBtn = _jobPairsModalBody.querySelector('[data-jp-next]');
+        if (!rangeEl) return;
+
+        const rangeStart = _jpTotal === 0 ? 0 : _jpStart + 1;
+        const rangeEnd   = Math.min(_jpStart + _jpParsedRows.length, _jpTotal);
+        const canPrev    = _jpStart > 0;
+        const canNext    = _jpStart + _jpSize < _jpTotal;
+
+        rangeEl.innerHTML = _jpTotal
+            ? `Showing <strong class="text-gray-800">${rangeStart.toLocaleString()}–${rangeEnd.toLocaleString()}</strong> of <strong class="text-gray-800">${_jpTotal.toLocaleString()}</strong>`
+            : 'No results';
+
+        const ACTIVE_CLS   = 'px-3 py-1 rounded border text-xs font-medium bg-white hover:bg-gray-100 border-gray-300 text-gray-700 cursor-pointer transition-colors';
+        const DISABLED_CLS = 'px-3 py-1 rounded border text-xs font-medium bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed';
+        if (prevBtn) { prevBtn.disabled = !canPrev; prevBtn.className = canPrev ? ACTIVE_CLS : DISABLED_CLS; }
+        if (nextBtn) { nextBtn.disabled = !canNext; nextBtn.className = canNext ? ACTIVE_CLS : DISABLED_CLS; }
+    }
+
+    // Fetches the page at the current _jpStart, overlays the table while loading,
+    // then updates tbody + pagination. Does NOT rebuild the scaffold.
+    async function _jpChangePage() {
+        const overlay = _jobPairsModalBody.querySelector('[data-jp-overlay]');
+        overlay?.classList.remove('hidden');
+        try {
+            const body = new URLSearchParams({
+                sEcho: '1', iDisplayStart: String(_jpStart),
+                iDisplayLength: String(_jpSize), iSortCol_0: '0',
+                sSearch: _jpSearch,
+            });
+            const data    = await _apiFetch(_jpUrl, { method: 'POST', body });
+            _jpTotal      = data?.iTotalDisplayRecords ?? data?.iTotalRecords ?? 0;
+            _jpParsedRows = _jpParseRows(data?.aaData ?? []);
+            _jpRenderTable();
+            _jpUpdatePagination();
+        } catch (err) {
+            const rangeEl = _jobPairsModalBody.querySelector('[data-jp-range]');
+            if (rangeEl) rangeEl.textContent = `Error: ${_esc(err.message)}`;
+        } finally {
+            overlay?.classList.add('hidden');
+        }
+    }
+
+    async function _openJobPairsModal(url, title) {
+        // Reset all state for the new modal open.
+        _jpUrl    = url;
+        _jpStart  = 0;
+        _jpTotal  = 0;
+        _jpSearch = '';
         _jpSortCol    = -1;
         _jpSortDir    = 'asc';
+        _jpParsedRows = [];
 
-        _jobPairsModalTitle.textContent = domainName;
+        _jobPairsModalTitle.textContent = title;
+        _jobPairsModalBody.className = 'h-full flex items-center justify-center';
         _jobPairsModalBody.innerHTML = `
             <div class="text-center text-gray-400 py-12">
                 <i class="fas fa-circle-notch fa-spin text-3xl mb-2"></i>
@@ -1755,49 +1875,58 @@
         _jobPairsModal.classList.remove('hidden');
 
         try {
-            const fetchBody = new URLSearchParams({
-                sEcho: '1', iDisplayStart: '0', iDisplayLength: '500', iSortCol_0: '0',
+            const body = new URLSearchParams({
+                sEcho: '1', iDisplayStart: '0', iDisplayLength: String(_jpSize),
+                iSortCol_0: '0', sSearch: '',
             });
-            const data = await _apiFetch(
-                `/starexec/services/jobs/pairs/pagination/${jobSpaceId}/true/false/1`,
-                { method: 'POST', body: fetchBody }
-            );
+            const data    = await _apiFetch(url, { method: 'POST', body });
             const rawRows = data?.aaData ?? [];
+            _jpTotal = data?.iTotalDisplayRecords ?? data?.iTotalRecords ?? rawRows.length;
 
             if (!rawRows.length) {
-                _jobPairsModalBody.innerHTML = '<p class="text-gray-400 text-sm p-8 italic">No job pairs found for this domain.</p>';
+                _jobPairsModalBody.innerHTML = '<p class="text-gray-400 text-sm p-8 italic">No job pairs found.</p>';
                 return;
             }
 
-            // Parse all rows once into clean objects.
-            _jpParsedRows = rawRows.map(row => ({
-                benchHref:  _extractHref(String(row[0] ?? '')),
-                benchName:  _extractText(String(row[0] ?? '')) || '—',
-                solverName: _extractText(String(row[1] ?? '')) || '—',
-                configName: _extractText(String(row[2] ?? '')) || '—',
-                status:     _extractText(String(row[3] ?? '')) || '—',
-                wallclock:  _extractText(String(row[4] ?? '')) || '—',
-                result:     _extractText(String(row[5] ?? '')) || '—',
-            }));
+            _jpParsedRows = _jpParseRows(rawRows);
 
-            // Build table scaffold (headers + empty tbody).
-            const TH_BASE = 'px-4 py-3 text-left font-semibold uppercase tracking-wider whitespace-nowrap cursor-pointer select-none transition-colors hover:bg-gray-100 text-gray-500';
+            // Build the persistent scaffold — rebuilt only when modal opens anew.
+            const TH_BASE = 'px-4 py-3 text-left font-semibold uppercase tracking-wider whitespace-nowrap cursor-pointer select-none transition-colors hover:bg-gray-100 text-gray-500 text-xs';
             const headerHtml = JP_COLS.map((col, i) =>
                 `<th data-jp-col="${i}" class="${TH_BASE}">${_esc(col.label)}<i data-jp-icon class="fas fa-sort ml-1 opacity-30"></i></th>`
             ).join('');
 
+            _jobPairsModalBody.className = 'h-full flex flex-col';
             _jobPairsModalBody.innerHTML = `
-                <div class="overflow-auto h-full flex flex-col">
+                <div class="px-4 py-2 border-b bg-white shrink-0 flex items-center gap-2">
+                    <i class="fas fa-search text-gray-300 text-xs shrink-0"></i>
+                    <input id="jp-search" type="text" placeholder="Search…"
+                           class="flex-1 text-xs border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400 text-gray-700">
+                </div>
+                <div data-jp-table-wrap class="flex-1 overflow-auto relative">
+                    <div data-jp-overlay class="hidden absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center z-20">
+                        <i class="fas fa-circle-notch fa-spin text-gray-400 text-2xl"></i>
+                    </div>
                     <table data-jp-table class="min-w-full border-collapse text-xs">
                         <thead class="bg-gray-50 sticky top-0 z-10 border-b-2 border-gray-200">
                             <tr>${headerHtml}</tr>
                         </thead>
                         <tbody></tbody>
                     </table>
-                    <p class="text-xs text-gray-400 px-4 py-2 shrink-0">Showing ${rawRows.length} pair${rawRows.length === 1 ? '' : 's'}.</p>
+                </div>
+                <div class="shrink-0 px-4 py-2.5 border-t bg-gray-50 flex items-center justify-between text-xs text-gray-600 gap-4">
+                    <span data-jp-range></span>
+                    <div class="flex items-center gap-2">
+                        <button data-jp-prev class="px-3 py-1 rounded border text-xs font-medium bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed" disabled>
+                            <i class="fas fa-chevron-left mr-1 text-[10px]"></i>Previous
+                        </button>
+                        <button data-jp-next class="px-3 py-1 rounded border text-xs font-medium bg-white hover:bg-gray-100 border-gray-300 text-gray-700 cursor-pointer transition-colors">
+                            Next<i class="fas fa-chevron-right ml-1 text-[10px]"></i>
+                        </button>
+                    </div>
                 </div>`;
 
-            // Attach sort listeners to headers.
+            // Sort listeners — attached once per modal open.
             _jobPairsModalBody.querySelectorAll('th[data-jp-col]').forEach(th => {
                 th.addEventListener('click', () => {
                     const idx = parseInt(th.dataset.jpCol, 10);
@@ -1811,8 +1940,33 @@
                 });
             });
 
+            // Pagination listeners.
+            _jobPairsModalBody.querySelector('[data-jp-prev]').addEventListener('click', () => {
+                if (_jpStart === 0) return;
+                _jpStart = Math.max(0, _jpStart - _jpSize);
+                _jpChangePage();
+            });
+            _jobPairsModalBody.querySelector('[data-jp-next]').addEventListener('click', () => {
+                if (_jpStart + _jpSize >= _jpTotal) return;
+                _jpStart += _jpSize;
+                _jpChangePage();
+            });
+
+            // Search listener — debounced, server-side.
+            let _searchTimer;
+            _jobPairsModalBody.querySelector('#jp-search').addEventListener('input', e => {
+                clearTimeout(_searchTimer);
+                _searchTimer = setTimeout(() => {
+                    _jpSearch = e.target.value.trim();
+                    _jpStart  = 0;
+                    _jpChangePage();
+                }, 350);
+            });
+
             _jpRenderTable();
+            _jpUpdatePagination();
         } catch (err) {
+            _jobPairsModalBody.className = 'h-full flex items-center justify-center';
             _jobPairsModalBody.innerHTML = `
                 <div class="flex items-center gap-2 text-red-400 text-sm p-8">
                     <i class="fas fa-exclamation-circle"></i>
@@ -1828,7 +1982,27 @@
         e.stopPropagation();
         const jobSpaceId = btn.dataset.jobSpaceId;
         const domainName = btn.dataset.domainName || btn.textContent.trim();
-        if (jobSpaceId) _openJobPairsModal(jobSpaceId, domainName);
+        if (jobSpaceId) _openJobPairsModal(
+            `/starexec/services/jobs/pairs/pagination/${jobSpaceId}/true/false/1`,
+            domainName
+        );
+    });
+
+    // Event delegation: catch clicks on solver column header buttons in any matrix table.
+    document.addEventListener('click', e => {
+        const btn = e.target.closest('.solver-col-btn');
+        if (!btn) return;
+        e.stopPropagation();
+        const solverId   = btn.dataset.solverId;
+        const solverName = btn.dataset.solverName || btn.textContent.trim();
+        if (!solverId) return;
+        const table = btn.closest('table[data-matrix-job]');
+        const jobId = table?.dataset?.matrixJob;
+        if (!jobId) return;
+        _openJobPairsModal(
+            `/starexec/services/jobs/pairs/solver/${jobId}/${solverId}/0/1`,
+            solverName
+        );
     });
 </script>
 </body>

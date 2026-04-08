@@ -169,6 +169,29 @@
         </div>
     </div>
 
+<!-- Job Pairs Modal -->
+<div id="job-pairs-modal" class="fixed inset-0 bg-gray-900 bg-opacity-60 hidden flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+    <div class="bg-white w-full max-w-5xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
+        <div class="px-6 py-4 border-b flex items-center justify-between bg-gradient-to-r from-blue-50 to-white shrink-0">
+            <div class="flex items-center gap-3 min-w-0">
+                <i class="fa-solid fa-table-list text-blue-500 shrink-0"></i>
+                <h2 id="job-pairs-modal-title" class="text-base font-bold text-gray-900 truncate">Job Pairs</h2>
+            </div>
+            <button id="job-pairs-modal-close" class="text-gray-400 hover:text-gray-600 transition-colors shrink-0 ml-4">
+                <i class="fas fa-times text-lg"></i>
+            </button>
+        </div>
+        <div class="flex-1 overflow-auto p-0">
+            <div id="job-pairs-modal-body" class="h-full mt-5 flex items-center justify-center">
+                <div class="text-center text-gray-400">
+                    <i class="fas fa-circle-notch fa-spin text-3xl mb-2"></i>
+                    <p class="text-sm">Loading…</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Create Job Modal -->
 <div id="create-job-modal" class="fixed inset-0 bg-gray-900 bg-opacity-60 hidden flex items-center justify-center z-50 p-4 backdrop-blur-sm">
     <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
@@ -656,11 +679,13 @@
 
         const LOADING_CELL = `<td style="${CELL_BASE}"><i class="fas fa-circle-notch fa-spin" style="font-size:9px; color:#d1d5db;"></i></td>`;
 
-        const bodyRows = domains.map(({ spaceName }) => {
+        const BTN_STYLE = 'background:none; border:none; padding:0; margin:0; cursor:pointer; font:inherit; font-size:11px; font-weight:600; color:#374151; text-align:left; white-space:nowrap; text-decoration:underline; text-decoration-color:#d1d5db; text-underline-offset:2px;';
+        const bodyRows = domains.map(({ spaceName, spaceId }) => {
+            const nameBtn = `<button class="domain-row-btn" style="${BTN_STYLE}" data-job-space-id="${_esc(String(spaceId))}" data-domain-name="${_esc(spaceName)}" title="View job pairs for ${_esc(spaceName)}">${_esc(spaceName)}</button>`;
             if (!data.has(spaceName)) {
                 // Not yet fetched — pulsing spinner cells; class triggers CSS animation.
                 return `<tr class="matrix-row-loading" data-domain-row="${_esc(spaceName)}" style="border-bottom:1px solid #f3f4f6;">
-                    <td style="${TD_STICK}">${_esc(spaceName)}</td>${solvers.map(s => `<td data-solver-cell="${_esc(s)}" style="${CELL_BASE}"><i class="fas fa-circle-notch fa-spin" style="font-size:9px; color:#d1d5db;"></i></td>`).join('')}
+                    <td style="${TD_STICK}">${nameBtn}</td>${solvers.map(s => `<td data-solver-cell="${_esc(s)}" style="${CELL_BASE}"><i class="fas fa-circle-notch fa-spin" style="font-size:9px; color:#d1d5db;"></i></td>`).join('')}
                 </tr>`;
             }
             const domainMap = data.get(spaceName);
@@ -670,7 +695,7 @@
                 return `<td data-solver-cell="${_esc(s)}" style="${_cellStyle(ratio)} ${CELL_BASE}">${_esc(ratio)}</td>`;
             }).join('');
             return `<tr data-domain-row="${_esc(spaceName)}" style="border-bottom:1px solid #f3f4f6; transition:background .1s;" onmouseover="this.style.background='#fffbeb'" onmouseout="this.style.background=''">
-                <td style="${TD_STICK}">${_esc(spaceName)}</td>${cells}
+                <td style="${TD_STICK}">${nameBtn}</td>${cells}
             </tr>`;
         }).join('');
 
@@ -1587,6 +1612,223 @@
                 submitBtn.innerHTML = '<i class="fa-solid fa-play mr-2"></i>Create Job';
             }
         });
+    });
+
+    // ── Job Pairs Modal ──────────────────────────────────────────────────────
+    const _jobPairsModal      = document.getElementById('job-pairs-modal');
+    const _jobPairsModalTitle = document.getElementById('job-pairs-modal-title');
+    const _jobPairsModalBody  = document.getElementById('job-pairs-modal-body');
+
+    document.getElementById('job-pairs-modal-close').addEventListener('click', () => {
+        _jobPairsModal.classList.add('hidden');
+    });
+    _jobPairsModal.addEventListener('click', e => {
+        if (e.target === _jobPairsModal) _jobPairsModal.classList.add('hidden');
+    });
+
+    // Extract text content from an HTML string via DOMParser.
+    function _extractText(html) {
+        try {
+            return new DOMParser().parseFromString(String(html), 'text/html')
+                       .body.textContent?.trim() || '';
+        } catch (_) { return String(html).trim(); }
+    }
+
+    // Extract the first href from an HTML string.
+    function _extractHref(html) {
+        try {
+            const a = new DOMParser().parseFromString(String(html), 'text/html')
+                          .body.querySelector('a[href]');
+            return a ? a.getAttribute('href') : null;
+        } catch (_) { return null; }
+    }
+
+    // Column definitions for the job pairs table.
+    const JP_COLS = [
+        { label: 'Benchmark',    key: 'benchName',  numeric: false },
+        { label: 'Solver',       key: 'solverName', numeric: false },
+        { label: 'Config',       key: 'configName', numeric: false },
+        { label: 'Status',       key: 'status',     numeric: false },
+        { label: 'Wallclock (s)', key: 'wallclock',  numeric: true  },
+        { label: 'Result',       key: 'result',     numeric: false },
+    ];
+
+    let _jpParsedRows = [];   // [{benchHref, benchName, solverName, …}, …]
+    let _jpSortCol    = -1;   // index into JP_COLS, -1 = unsorted (insertion order)
+    let _jpSortDir    = 'asc';
+
+    // Comparator used by sort: numeric cols parse as float, others use localeCompare.
+    function _jpCompare(a, b, colIdx, dir) {
+        const col = JP_COLS[colIdx];
+        const av = a[col.key], bv = b[col.key];
+        let cmp;
+        if (col.numeric) {
+            const an = parseFloat(av) || 0, bn = parseFloat(bv) || 0;
+            cmp = an - bn;
+        } else {
+            cmp = av.localeCompare(bv, undefined, { sensitivity: 'base', numeric: true });
+        }
+        return dir === 'asc' ? cmp : -cmp;
+    }
+
+    // (Re)builds only the <tbody> rows and updates header icon state.
+    function _jpRenderTable() {
+        const table = _jobPairsModalBody.querySelector('table[data-jp-table]');
+        if (!table) return;
+        const tbody = table.querySelector('tbody');
+        const ths   = table.querySelectorAll('thead th[data-jp-col]');
+
+        // Update header icons + active styling.
+        ths.forEach(th => {
+            const idx = parseInt(th.dataset.jpCol, 10);
+            const icon = th.querySelector('i[data-jp-icon]');
+            if (idx === _jpSortCol) {
+                icon.className = `fas fa-sort-${_jpSortDir === 'asc' ? 'up' : 'down'} ml-1 text-blue-500`;
+                th.classList.add('text-blue-600');
+                th.classList.remove('text-gray-500');
+            } else {
+                icon.className = 'fas fa-sort ml-1 opacity-30';
+                th.classList.remove('text-blue-600');
+                th.classList.add('text-gray-500');
+            }
+        });
+
+        // Sort a shallow copy so insertion order is preserved in _jpParsedRows.
+        const sorted = _jpSortCol === -1
+            ? [..._jpParsedRows]
+            : [..._jpParsedRows].sort((a, b) => _jpCompare(a, b, _jpSortCol, _jpSortDir));
+
+        const frag = document.createDocumentFragment();
+        sorted.forEach(r => {
+            const tr = document.createElement('tr');
+            tr.className = 'border-b border-gray-100 hover:bg-gray-50 transition-colors text-xs';
+
+            // Benchmark cell — may include external link.
+            const benchTd = document.createElement('td');
+            benchTd.className = 'px-4 py-2 text-gray-800 max-w-xs truncate';
+            if (r.benchHref) {
+                const a = document.createElement('a');
+                a.href = r.benchHref;
+                a.target = '_blank';
+                a.className = 'text-blue-600 hover:underline inline-flex items-center gap-1';
+                a.textContent = r.benchName;
+                const ico = document.createElement('i');
+                ico.className = 'fas fa-arrow-up-right-from-square text-xs opacity-60';
+                a.appendChild(ico);
+                benchTd.appendChild(a);
+            } else {
+                benchTd.textContent = r.benchName;
+            }
+            tr.appendChild(benchTd);
+
+            [
+                ['px-4 py-2 text-gray-700 whitespace-nowrap',       r.solverName],
+                ['px-4 py-2 text-gray-500 whitespace-nowrap',       r.configName],
+                ['px-4 py-2 text-gray-700 whitespace-nowrap',       r.status],
+                ['px-4 py-2 text-gray-700 font-mono whitespace-nowrap', r.wallclock],
+                ['px-4 py-2 font-semibold whitespace-nowrap',       r.result],
+            ].forEach(([cls, val]) => {
+                const td = document.createElement('td');
+                td.className = cls;
+                td.textContent = val;
+                tr.appendChild(td);
+            });
+
+            frag.appendChild(tr);
+        });
+
+        tbody.replaceChildren(frag);
+    }
+
+    async function _openJobPairsModal(jobSpaceId, domainName) {
+        // Reset sort state for each new open.
+        _jpParsedRows = [];
+        _jpSortCol    = -1;
+        _jpSortDir    = 'asc';
+
+        _jobPairsModalTitle.textContent = domainName;
+        _jobPairsModalBody.innerHTML = `
+            <div class="text-center text-gray-400 py-12">
+                <i class="fas fa-circle-notch fa-spin text-3xl mb-2"></i>
+                <p class="text-sm">Loading job pairs…</p>
+            </div>`;
+        _jobPairsModal.classList.remove('hidden');
+
+        try {
+            const fetchBody = new URLSearchParams({
+                sEcho: '1', iDisplayStart: '0', iDisplayLength: '500', iSortCol_0: '0',
+            });
+            const data = await _apiFetch(
+                `/starexec/services/jobs/pairs/pagination/${jobSpaceId}/true/false/1`,
+                { method: 'POST', body: fetchBody }
+            );
+            const rawRows = data?.aaData ?? [];
+
+            if (!rawRows.length) {
+                _jobPairsModalBody.innerHTML = '<p class="text-gray-400 text-sm p-8 italic">No job pairs found for this domain.</p>';
+                return;
+            }
+
+            // Parse all rows once into clean objects.
+            _jpParsedRows = rawRows.map(row => ({
+                benchHref:  _extractHref(String(row[0] ?? '')),
+                benchName:  _extractText(String(row[0] ?? '')) || '—',
+                solverName: _extractText(String(row[1] ?? '')) || '—',
+                configName: _extractText(String(row[2] ?? '')) || '—',
+                status:     _extractText(String(row[3] ?? '')) || '—',
+                wallclock:  _extractText(String(row[4] ?? '')) || '—',
+                result:     _extractText(String(row[5] ?? '')) || '—',
+            }));
+
+            // Build table scaffold (headers + empty tbody).
+            const TH_BASE = 'px-4 py-3 text-left font-semibold uppercase tracking-wider whitespace-nowrap cursor-pointer select-none transition-colors hover:bg-gray-100 text-gray-500';
+            const headerHtml = JP_COLS.map((col, i) =>
+                `<th data-jp-col="${i}" class="${TH_BASE}">${_esc(col.label)}<i data-jp-icon class="fas fa-sort ml-1 opacity-30"></i></th>`
+            ).join('');
+
+            _jobPairsModalBody.innerHTML = `
+                <div class="overflow-auto h-full flex flex-col">
+                    <table data-jp-table class="min-w-full border-collapse text-xs">
+                        <thead class="bg-gray-50 sticky top-0 z-10 border-b-2 border-gray-200">
+                            <tr>${headerHtml}</tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <p class="text-xs text-gray-400 px-4 py-2 shrink-0">Showing ${rawRows.length} pair${rawRows.length === 1 ? '' : 's'}.</p>
+                </div>`;
+
+            // Attach sort listeners to headers.
+            _jobPairsModalBody.querySelectorAll('th[data-jp-col]').forEach(th => {
+                th.addEventListener('click', () => {
+                    const idx = parseInt(th.dataset.jpCol, 10);
+                    if (_jpSortCol === idx) {
+                        _jpSortDir = _jpSortDir === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        _jpSortCol = idx;
+                        _jpSortDir = 'asc';
+                    }
+                    _jpRenderTable();
+                });
+            });
+
+            _jpRenderTable();
+        } catch (err) {
+            _jobPairsModalBody.innerHTML = `
+                <div class="flex items-center gap-2 text-red-400 text-sm p-8">
+                    <i class="fas fa-exclamation-circle"></i>
+                    Could not load job pairs: ${_esc(err.message)}
+                </div>`;
+        }
+    }
+
+    // Event delegation: catch clicks on domain-row-btn buttons inside any matrix table.
+    document.addEventListener('click', e => {
+        const btn = e.target.closest('.domain-row-btn');
+        if (!btn) return;
+        e.stopPropagation();
+        const jobSpaceId = btn.dataset.jobSpaceId;
+        const domainName = btn.dataset.domainName || btn.textContent.trim();
+        if (jobSpaceId) _openJobPairsModal(jobSpaceId, domainName);
     });
 </script>
 </body>

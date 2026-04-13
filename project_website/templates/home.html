@@ -2302,6 +2302,7 @@
             const benchHtml  = String(row[0] ?? '');
             const solverHtml = String(row[1] ?? '');
             const configHtml = String(row[2] ?? '');
+            const status     = _extractText(String(row[3] ?? '')) || '—';
             const wallclock  = _extractText(String(row[4] ?? '')) || '—';
             const result     = _extractText(String(row[5] ?? '')) || '—';
 
@@ -2331,7 +2332,7 @@
             solverSet.add(solverName);
             // First result wins (StarExec may return duplicate pairs in edge cases).
             if (!entry.solvers.has(solverName)) {
-                entry.solvers.set(solverName, { result, wallclock, config: configName, solverId });
+                entry.solvers.set(solverName, { result, status, wallclock, config: configName, solverId });
             }
         });
 
@@ -2371,10 +2372,15 @@
             const cells = solvers.map(s => {
                 const pair = solverMap.get(s);
                 if (!pair) return EMPTY_CELL;
-                const { result, wallclock, config } = pair;
+                const { result, status, wallclock, config } = pair;
+                const isComplete = /^complete/i.test(status);
+                const statusHtml = isComplete
+                    ? `<span>${_esc(status)}</span>`
+                    : `<span style="font-weight:700;"><i class="fas fa-triangle-exclamation" style="font-size:8px; margin-right:2px;"></i>${_esc(status)}</span>`;
                 return `<td style="${_pairResultStyle(result)} ${CELL_BASE}">
-                    <div style="font-weight:600;">${_esc(result)}</div>
-                    <div style="font-size:9px; color:#6b7280; margin-top:1px; white-space:nowrap;">${_esc(wallclock)}s · ${_esc(config)}</div>
+                    <div style="font-weight:bold;">${_esc(result)}</div>
+                    <div style="font-size:10px; opacity:0.8; margin-top:2px; white-space:nowrap;">${statusHtml} | <span>${_esc(wallclock)}s</span></div>
+                    <div style="font-size:9px; color:#6b7280; margin-top:1px; white-space:nowrap;">${_esc(config)}</div>
                 </td>`;
             }).join('');
 

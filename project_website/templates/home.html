@@ -192,6 +192,15 @@
     </div>
 </div>
 
+<!-- Benchmark Detail Modal (z-[60] stacks above Job Pairs modal z-50) -->
+<div id="benchmark-modal" class="fixed inset-0 hidden flex items-center justify-center z-[60] p-4" style="background:rgba(15,23,42,0.72); backdrop-filter:blur(5px);">
+    <div class="w-full max-h-[88vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden" style="background:#0f172a; max-width:800px;">
+        <div id="benchmark-modal-inner" class="flex flex-col min-h-0 h-full">
+            <!-- Content injected by _showBenchmarkModal -->
+        </div>
+    </div>
+</div>
+
 <!-- Create Job Modal -->
 <div id="create-job-modal" class="fixed inset-0 bg-gray-900 bg-opacity-60 hidden flex items-center justify-center z-50 p-4 backdrop-blur-sm">
     <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
@@ -1759,18 +1768,31 @@
             const tr = document.createElement('tr');
             tr.className = 'border-b border-gray-100 hover:bg-gray-50 transition-colors text-xs';
 
-            // Benchmark cell — may include external link.
+            // Benchmark cell — intercept benchmark.jsp links to open detail modal.
             const benchTd = document.createElement('td');
             benchTd.className = 'px-4 py-2 text-gray-800 max-w-xs truncate';
             if (r.benchHref) {
+                const benchIdMatch = r.benchHref.match(/benchmark\.jsp[^?]*\?.*[?&]id=(\d+)/i)
+                                  || r.benchHref.match(/[?&]id=(\d+)/);
                 const a = document.createElement('a');
-                a.href = r.benchHref;
-                a.target = '_blank';
-                a.className = 'text-blue-600 hover:underline inline-flex items-center gap-1';
-                a.textContent = r.benchName;
-                const ico = document.createElement('i');
-                ico.className = 'fas fa-arrow-up-right-from-square text-xs opacity-60';
-                a.appendChild(ico);
+                if (benchIdMatch) {
+                    a.href = '#';
+                    a.className = 'benchmark-info-trigger text-blue-600 hover:text-blue-800 inline-flex items-center gap-1 transition-colors';
+                    a.dataset.benchmarkId   = benchIdMatch[1];
+                    a.dataset.benchmarkName = r.benchName;
+                    const ico = document.createElement('i');
+                    ico.className = 'fas fa-magnifying-glass text-[10px] opacity-50';
+                    a.textContent = r.benchName;
+                    a.appendChild(ico);
+                } else {
+                    a.href = r.benchHref;
+                    a.target = '_blank';
+                    a.className = 'text-blue-600 hover:underline inline-flex items-center gap-1';
+                    a.textContent = r.benchName;
+                    const ico = document.createElement('i');
+                    ico.className = 'fas fa-arrow-up-right-from-square text-xs opacity-60';
+                    a.appendChild(ico);
+                }
                 benchTd.appendChild(a);
             } else {
                 benchTd.textContent = r.benchName;
@@ -2003,6 +2025,216 @@
             `/starexec/services/jobs/pairs/solver/${jobId}/${solverId}/0/1`,
             solverName
         );
+    });
+
+    // ── Benchmark Detail Modal ────────────────────────────────────────────
+    const _benchModal      = document.getElementById('benchmark-modal');
+    const _benchModalInner = document.getElementById('benchmark-modal-inner');
+
+    function _closeBenchmarkModal() {
+        _benchModal.classList.add('hidden');
+        _benchModalInner.innerHTML = '';
+    }
+
+    // Close on backdrop click.
+    _benchModal.addEventListener('click', e => {
+        if (e.target === _benchModal) _closeBenchmarkModal();
+    });
+
+    async function _fetchBenchmarkDetails(id) {
+        return _apiFetch(`/starexec/services/benchmarks/${id}/contents?limit=-1`);
+    }
+
+    async function _showBenchmarkModal(id, name) {
+        // Show loading state.
+        _benchModalInner.innerHTML = `
+            <div class="flex-1 flex items-center justify-center py-16">
+                <div class="text-center" style="color:#64748b;">
+                    <i class="fas fa-circle-notch fa-spin text-3xl mb-3" style="color:#38bdf8;"></i>
+                    <p class="text-sm mt-2" style="color:#94a3b8;">Loading benchmark…</p>
+                </div>
+            </div>`;
+        _benchModal.classList.remove('hidden');
+
+        let data;
+        try {
+            data = await _fetchBenchmarkDetails(id);
+        } catch (err) {
+            _benchModalInner.innerHTML = `
+                <div class="flex flex-col h-full min-h-0">
+                    <div class="flex items-center justify-between px-5 py-4 shrink-0" style="border-bottom:1px solid #1e293b;">
+                        <div class="flex items-center gap-3">
+                            <i class="fas fa-file-code" style="color:#f87171;"></i>
+                            <span class="text-sm font-semibold" style="color:#f1f5f9;">${_esc(name || `Benchmark #${id}`)}</span>
+                        </div>
+                        <button onclick="_closeBenchmarkModal()" style="color:#64748b;" class="hover:text-white transition-colors">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div class="flex-1 flex items-center justify-center p-8">
+                        <div class="flex items-center gap-2" style="color:#f87171;">
+                            <i class="fas fa-exclamation-circle"></i>
+                            <span class="text-sm">Could not load benchmark: ${_esc(err.message)}</span>
+                        </div>
+                    </div>
+                    <div class="shrink-0 px-5 py-3" style="border-top:1px solid #1e293b;">
+                        <button onclick="_closeBenchmarkModal()" class="flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors" style="color:#94a3b8; background:#1e293b;">
+                            <i class="fas fa-arrow-left text-[10px]"></i>Back to Job Pairs
+                        </button>
+                    </div>
+                </div>`;
+            return;
+        }
+
+        // Normalise fields.
+        const bName  = data.name || name || `Benchmark #${id}`;
+        const bId    = data.id   ?? id;
+        const bDate  = data.uploadDate || '—';
+        const bType  = data.type
+            ? (typeof data.type === 'object' ? (data.type.name ?? String(data.type.id ?? '—')) : String(data.type))
+            : '—';
+        const bDisk  = (() => {
+            const n = Number(data.diskSize);
+            if (!data.diskSize && data.diskSize !== 0) return '—';
+            if (n < 1024)       return `${n} B`;
+            if (n < 1048576)    return `${(n / 1024).toFixed(2)} KB`;
+            if (n < 1073741824) return `${(n / 1048576).toFixed(2)} MB`;
+            return `${(n / 1073741824).toFixed(2)} GB`;
+        })();
+        const bOwner = (() => {
+            const o = data.owner;
+            if (!o) return data.userId != null ? String(data.userId) : '—';
+            if (typeof o === 'object') {
+                const fullName = [o.firstName, o.lastName].filter(Boolean).join(' ') || '—';
+                return o.email ? `${fullName} (${o.email})` : fullName;
+            }
+            return String(o);
+        })();
+
+        // Attributes: StarExec returns a plain object map {key: value} or an array.
+        const bAttrsEntries = (() => {
+            const a = data.attributes;
+            if (!a) return [];
+            if (Array.isArray(a)) return a.map(x => typeof x === 'object' ? [x.key ?? x.name ?? '', x.value ?? ''] : [String(x), '']);
+            if (typeof a === 'object') return Object.entries(a);
+            return [];
+        })();
+
+        // Dependencies: array of {dependencyPath, ...}.
+        const bDeps = Array.isArray(data.dependencies) ? data.dependencies : [];
+
+        // Content: treat empty string as absent.
+        const bRawContent = data.contents ?? data.content ?? null;
+        const bContent    = (bRawContent != null && String(bRawContent).trim().length > 0) ? String(bRawContent) : null;
+
+        // ── Build section HTML ──────────────────────────────────────────
+        const DT = 'style="font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; color:#475569; padding:4px 12px 2px 0; white-space:nowrap; vertical-align:top;"';
+        const DD = 'style="font-size:11px; font-family:ui-monospace,monospace; color:#e2e8f0; padding:4px 0 2px 0;"';
+
+        const coreInfoHtml = `
+            <dl style="display:grid; grid-template-columns:auto 1fr; row-gap:0; column-gap:8px;">
+                <dt ${DT}>Name</dt>       <dd ${DD}>${_esc(bName)}</dd>
+                <dt ${DT}>ID</dt>         <dd ${DD}>#${_esc(String(bId))}</dd>
+                <dt ${DT}>Owner</dt>      <dd ${DD}>${_esc(bOwner)}</dd>
+                <dt ${DT}>Upload Date</dt><dd ${DD}>${_esc(bDate)}</dd>
+                <dt ${DT}>Type</dt>       <dd ${DD}>${_esc(bType)}</dd>
+                <dt ${DT}>Disk Size</dt>  <dd ${DD}>${_esc(String(bDisk))}</dd>
+            </dl>`;
+
+        const attrsHtml = bAttrsEntries.length
+            ? `<dl style="display:grid; grid-template-columns:auto 1fr; row-gap:0; column-gap:8px; margin:0;">
+                ${bAttrsEntries.map(([k, v]) => `
+                    <dt ${DT}>${_esc(String(k))}</dt>
+                    <dd ${DD}>${_esc(String(v))}</dd>`).join('')}
+               </dl>`
+            : `<span style="font-size:11px; font-style:italic; color:#475569;">No attributes.</span>`;
+
+        const depsHtml = bDeps.length
+            ? `<ul style="margin:0; padding:0; list-style:none;">
+                ${bDeps.map(dep => {
+                    const p = (typeof dep === 'object') ? (dep.dependencyPath ?? dep.path ?? JSON.stringify(dep)) : String(dep);
+                    return `<li style="font-size:11px; font-family:ui-monospace,monospace; color:#a3e635; padding:2px 0; word-break:break-all;">${_esc(String(p))}</li>`;
+                }).join('')}
+               </ul>`
+            : null;
+
+        const contentHtml = bContent
+            ? `<pre style="margin:0; padding:12px 14px; background:#020617; color:#4ade80; font-family:Consolas,'JetBrains Mono',Courier,ui-monospace,monospace; font-size:11px; line-height:1.6; white-space:pre-wrap; word-break:break-all; border-radius:8px; border:1px solid #1e293b; max-height:500px; overflow-y:auto;">${_esc(bContent)}</pre>`
+            : `<p style="margin:0; font-size:12px; font-style:italic; color:#475569;">No content available for this benchmark.</p>`;
+
+        // ── Assemble modal ──────────────────────────────────────────────
+        _benchModalInner.innerHTML = `
+            <div class="flex flex-col h-full min-h-0">
+                <!-- Header -->
+                <div class="shrink-0 px-5 py-4 flex items-start justify-between gap-4" style="border-bottom:1px solid #1e293b; background:#0f172a;">
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-2 mb-1">
+                            <i class="fas fa-file-code text-xs" style="color:#38bdf8;"></i>
+                            <span style="font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:#475569;">Benchmark</span>
+                            <span style="font-size:10px; padding:1px 6px; border-radius:4px; background:#1e293b; color:#64748b; border:1px solid #334155;">#${_esc(String(bId))}</span>
+                        </div>
+                        <h2 class="truncate" style="font-size:13px; font-weight:700; color:#f1f5f9; letter-spacing:.01em;" title="${_esc(bName)}">${_esc(bName)}</h2>
+                    </div>
+                    <button id="bench-modal-close-btn" style="color:#475569; flex-shrink:0; margin-top:2px; background:none; border:none; cursor:pointer; font-size:14px;" class="hover:text-white transition-colors">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+
+                <!-- Scrollable body -->
+                <div class="flex-1 overflow-auto min-h-0" style="background:#0f172a;">
+
+                    <!-- Section 1: Core Info -->
+                    <div style="padding:14px 20px 12px; border-bottom:1px solid #1e293b;">
+                        <p style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:#334155; margin:0 0 8px 0;">Core Info</p>
+                        ${coreInfoHtml}
+                    </div>
+
+                    <!-- Section 2: Attributes -->
+                    <div style="padding:14px 20px 12px; border-bottom:1px solid #1e293b; background:#0c1525;">
+                        <p style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:#334155; margin:0 0 8px 0;">Attributes</p>
+                        ${attrsHtml}
+                    </div>
+
+                    ${depsHtml ? `
+                    <!-- Section 3: Dependencies -->
+                    <div style="padding:14px 20px 12px; border-bottom:1px solid #1e293b;">
+                        <p style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:#334155; margin:0 0 8px 0;">Dependencies</p>
+                        ${depsHtml}
+                    </div>` : ''}
+
+                    <!-- Section 4: Content -->
+                    <div style="padding:14px 20px 16px;">
+                        <p style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:#334155; margin:0 0 8px 0;">Content</p>
+                        ${contentHtml}
+                    </div>
+
+                </div>
+
+                <!-- Footer -->
+                <div class="shrink-0 px-5 py-3 flex items-center justify-between" style="border-top:1px solid #1e293b; background:#0f172a;">
+                    <button id="bench-modal-back-btn" class="flex items-center gap-2 transition-colors" style="font-size:11px; font-weight:600; padding:5px 12px; border-radius:6px; color:#94a3b8; background:#1e293b; border:1px solid #334155; cursor:pointer;">
+                        <i class="fas fa-arrow-left" style="font-size:9px;"></i>Back to Job Pairs
+                    </button>
+                    <a href="/starexec/secure/details/benchmark.jsp?id=${_esc(String(bId))}" target="_blank"
+                       class="flex items-center gap-1.5 transition-colors" style="font-size:11px; font-weight:500; color:#38bdf8; text-decoration:none;">
+                        View on StarExec<i class="fas fa-arrow-up-right-from-square" style="font-size:9px;"></i>
+                    </a>
+                </div>
+            </div>`;
+
+        document.getElementById('bench-modal-close-btn')?.addEventListener('click', _closeBenchmarkModal);
+        document.getElementById('bench-modal-back-btn')?.addEventListener('click', _closeBenchmarkModal);
+    }
+
+    // Event delegation: intercept benchmark.jsp links in the job pairs table.
+    document.addEventListener('click', e => {
+        const a = e.target.closest('.benchmark-info-trigger');
+        if (!a) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const benchId   = a.dataset.benchmarkId;
+        const benchName = a.dataset.benchmarkName || '';
+        if (benchId) _showBenchmarkModal(benchId, benchName);
     });
 </script>
 </body>

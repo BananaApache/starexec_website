@@ -181,6 +181,9 @@
                 <i class="fas fa-times text-lg"></i>
             </button>
         </div>
+        <div id="dm-status-bar" style="display:none; align-items:center; gap:6px; padding:5px 16px; background:#f3f4f6; border-bottom:1px solid #e5e7eb; flex-shrink:0; font-size:11px; color:#6b7280;">
+            <span id="dm-status-text"></span>
+        </div>
         <div id="domain-matrix-modal-body" class="flex-1 min-h-0 flex flex-col overflow-hidden">
             <div class="flex items-center justify-center h-full text-gray-400">
                 <i class="fas fa-circle-notch fa-spin text-3xl"></i>
@@ -2262,6 +2265,8 @@
     const _domainMatrixModal      = document.getElementById('domain-matrix-modal');
     const _domainMatrixModalTitle = document.getElementById('domain-matrix-modal-title');
     const _domainMatrixModalBody  = document.getElementById('domain-matrix-modal-body');
+    const _dmStatusBar            = document.getElementById('dm-status-bar');
+    const _dmStatusText           = document.getElementById('dm-status-text');
 
     document.getElementById('domain-matrix-modal-close').addEventListener('click', () => {
         _domainMatrixModal.classList.add('hidden');
@@ -2495,8 +2500,8 @@
     }
 
     // Fetches every pair for a job-space in sequential PAGE_SIZE chunks.
-    // Updates the #dm-progress element after each page so the user sees live feedback.
-    // Returns the concatenated aaData array once all pages are exhausted.
+    // Updates #dm-status-bar with live progress after each page.
+    // Returns { rows, total } once all pages are exhausted.
     async function _fetchAllDomainPairs(jobSpaceId) {
         const PAGE_SIZE = 500;
         const url = `/starexec/services/jobs/pairs/pagination/${jobSpaceId}/true/false/1`;
@@ -2520,17 +2525,20 @@
 
             allRows.push(...page);
 
-            // Update the live progress counter in the modal (may not exist if already closed).
-            const prog = document.getElementById('dm-progress');
-            if (prog) prog.textContent =
-                `Fetching pairs: ${allRows.length.toLocaleString()} / ${total.toLocaleString()}…`;
+            // Show live loading progress in the persistent status bar.
+            if (_dmStatusBar && _dmStatusText) {
+                _dmStatusBar.style.display = 'flex';
+                _dmStatusText.innerHTML =
+                    'Loading: <span style="font-family:ui-monospace,monospace;font-weight:600;color:#374151;">' + allRows.length.toLocaleString() + '</span>' +
+                    '\u00a0/\u00a0<span style="font-family:ui-monospace,monospace;">' + total.toLocaleString() + '</span> entries\u2026';
+            }
 
             // Stop if the page was short (last page) or we hit the declared total.
             if (page.length < PAGE_SIZE) break;
             start += PAGE_SIZE;
         }
 
-        return allRows;
+        return { rows: allRows, total };
     }
 
     // Opens the domain matrix modal: sequentially fetches all pairs for a job-space,
@@ -2545,17 +2553,27 @@
             <div class="flex items-center justify-center h-full text-gray-400">
                 <div class="text-center py-12">
                     <i class="fas fa-circle-notch fa-spin text-3xl mb-3"></i>
-                    <p id="dm-progress" class="text-sm mt-2">Fetching pairs…</p>
+                    <p class="text-sm mt-2">Fetching pairs\u2026</p>
                 </div>
             </div>`;
+        if (_dmStatusBar) _dmStatusBar.style.display = 'none';
         _domainMatrixModal.classList.remove('hidden');
 
         try {
-            const allRows = await _fetchAllDomainPairs(jobSpaceId);
+            const { rows: allRows } = await _fetchAllDomainPairs(jobSpaceId);
 
             if (!allRows.length) {
+                if (_dmStatusBar) _dmStatusBar.style.display = 'none';
                 _domainMatrixModalBody.innerHTML = '<p style="padding:32px; font-size:12px; color:#9ca3af; font-style:italic;">No job pairs found for this domain.</p>';
                 return;
+            }
+
+            // Switch status bar to success state.
+            if (_dmStatusBar && _dmStatusText) {
+                _dmStatusBar.style.display = 'flex';
+                _dmStatusText.innerHTML =
+                    '<i class="fas fa-circle-check" style="color:#16a34a;margin-right:5px;"></i>' +
+                    'Showing all\u00a0<span style="font-family:ui-monospace,monospace;font-weight:600;color:#111827;">' + allRows.length.toLocaleString() + '</span>\u00a0entries';
             }
 
             const { benchMap, solvers } = _groupPairsByBenchmark(allRows);
@@ -2567,6 +2585,7 @@
             _domainMatrixModalBody.appendChild(scroll);
 
         } catch (err) {
+            if (_dmStatusBar) _dmStatusBar.style.display = 'none';
             _domainMatrixModalBody.innerHTML = `
                 <div class="flex items-center gap-2 text-red-400 text-sm p-8">
                     <i class="fas fa-exclamation-circle"></i>

@@ -169,6 +169,26 @@
         </div>
     </div>
 
+<!-- Domain Matrix Modal (Benchmark × Solver, z-50; solver-click opens job-pairs modal above it) -->
+<div id="domain-matrix-modal" class="fixed inset-0 bg-gray-900 bg-opacity-60 hidden flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+    <div class="bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in" style="width:90vw; height:85vh;">
+        <div class="px-6 py-4 border-b flex items-center justify-between bg-gradient-to-r from-indigo-50 to-white shrink-0">
+            <div class="flex items-center gap-3 min-w-0">
+                <i class="fa-solid fa-table text-indigo-500 shrink-0"></i>
+                <h2 id="domain-matrix-modal-title" class="text-base font-bold text-gray-900 truncate">Domain Matrix</h2>
+            </div>
+            <button id="domain-matrix-modal-close" class="text-gray-400 hover:text-gray-600 transition-colors shrink-0 ml-4">
+                <i class="fas fa-times text-lg"></i>
+            </button>
+        </div>
+        <div id="domain-matrix-modal-body" class="flex-1 min-h-0 flex flex-col overflow-hidden">
+            <div class="flex items-center justify-center h-full text-gray-400">
+                <i class="fas fa-circle-notch fa-spin text-3xl"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Job Pairs Modal -->
 <div id="job-pairs-modal" class="fixed inset-0 bg-gray-900 bg-opacity-60 hidden flex items-center justify-center z-50 p-4 backdrop-blur-sm">
     <div class="bg-white w-full max-w-5xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
@@ -1998,16 +2018,17 @@
     }
 
     // Event delegation: catch clicks on domain-row-btn buttons inside any matrix table.
+    // Opens the Benchmark × Solver domain matrix modal instead of the flat pairs list.
     document.addEventListener('click', e => {
         const btn = e.target.closest('.domain-row-btn');
         if (!btn) return;
         e.stopPropagation();
         const jobSpaceId = btn.dataset.jobSpaceId;
         const domainName = btn.dataset.domainName || btn.textContent.trim();
-        if (jobSpaceId) _openJobPairsModal(
-            `/starexec/services/jobs/pairs/pagination/${jobSpaceId}/true/false/1`,
-            domainName
-        );
+        if (!jobSpaceId) return;
+        const table = btn.closest('table[data-matrix-job]');
+        const jobId = table?.dataset?.matrixJob ?? null;
+        _showDomainMatrixModal(jobSpaceId, domainName, jobId);
     });
 
     // Event delegation: catch clicks on solver column header buttons in any matrix table.
@@ -2236,6 +2257,204 @@
         const benchName = a.dataset.benchmarkName || '';
         if (benchId) _showBenchmarkModal(benchId, benchName);
     });
+
+    // ── Domain Matrix Modal (Benchmark × Solver) ──────────────────────────
+    const _domainMatrixModal      = document.getElementById('domain-matrix-modal');
+    const _domainMatrixModalTitle = document.getElementById('domain-matrix-modal-title');
+    const _domainMatrixModalBody  = document.getElementById('domain-matrix-modal-body');
+
+    document.getElementById('domain-matrix-modal-close').addEventListener('click', () => {
+        _domainMatrixModal.classList.add('hidden');
+    });
+    _domainMatrixModal.addEventListener('click', e => {
+        if (e.target === _domainMatrixModal) _domainMatrixModal.classList.add('hidden');
+    });
+
+    // Color-code a single pair result string (sat/unsat/theorem/timeout/etc.).
+    function _pairResultStyle(result) {
+        if (!result || result === '—') return 'background:#f9fafb; color:#9ca3af;';
+        const r = result.toString().toLowerCase().trim();
+        if (['sat', 'unsat', 'theorem', 'valid', 'unsatisfiable', 'satisfiable', 'true', 'yes', 'proved'].includes(r))
+            return 'background:#d1fae5; color:#065f46; font-weight:600;';
+        if (r === 'wrong')
+            return 'background:#fca5a5; color:#7f1d1d; font-weight:700;';
+        if (['timeout', 'memout', 'cpu-limit', 'memory-limit', 'wall-limit'].includes(r))
+            return 'background:#fee2e2; color:#991b1b;';
+        if (['error', 'crash', 'failed'].includes(r))
+            return 'background:#fef3c7; color:#92400e;';
+        if (['starexec-unknown', 'unknown', 'skip', 'no-output'].includes(r))
+            return 'background:#f9fafb; color:#9ca3af;';
+        return 'background:#eff6ff; color:#1e40af;';
+    }
+
+    // Group raw aaData rows (from jobs/pairs/pagination) by benchmark name.
+    // Returns { benchMap: Map<benchName, {benchId, solvers: Map<solverName, {result,wallclock,config,solverId}>}>,
+    //           solvers: string[] (sorted unique solver names) }
+    //
+    // Row layout for jobs/pairs/pagination:
+    //   row[0] = benchmark HTML  row[1] = solver HTML  row[2] = config HTML
+    //   row[3] = status          row[4] = wallclock     row[5] = result
+    function _groupPairsByBenchmark(rawRows) {
+        const benchMap  = new Map();
+        const solverSet = new Set();
+
+        rawRows.forEach(row => {
+            const benchHtml  = String(row[0] ?? '');
+            const solverHtml = String(row[1] ?? '');
+            const configHtml = String(row[2] ?? '');
+            const wallclock  = _extractText(String(row[4] ?? '')) || '—';
+            const result     = _extractText(String(row[5] ?? '')) || '—';
+
+            const benchName = _extractText(benchHtml) || '—';
+            const benchHref = _extractHref(benchHtml);
+            const benchIdM  = benchHref && (
+                benchHref.match(/benchmark\.jsp[^?]*\?.*[?&]id=(\d+)/i) ||
+                benchHref.match(/[?&]id=(\d+)/)
+            );
+            const benchId = benchIdM ? benchIdM[1] : null;
+
+            const solverName = _extractText(solverHtml) || '—';
+            const solverHref = _extractHref(solverHtml);
+            const solverIdM  = solverHref && solverHref.match(/[?&]id=(\d+)/);
+            const solverId   = solverIdM
+                ? solverIdM[1]
+                : (solverIdMap.get(normalizeName(solverName)) ?? null);
+
+            const configName = _extractText(configHtml) || '—';
+
+            if (!benchMap.has(benchName)) {
+                benchMap.set(benchName, { benchId, solvers: new Map() });
+            }
+            const entry = benchMap.get(benchName);
+            if (!entry.benchId && benchId) entry.benchId = benchId;
+
+            solverSet.add(solverName);
+            // First result wins (StarExec may return duplicate pairs in edge cases).
+            if (!entry.solvers.has(solverName)) {
+                entry.solvers.set(solverName, { result, wallclock, config: configName, solverId });
+            }
+        });
+
+        const solvers = [...solverSet].sort((a, b) => a.localeCompare(b));
+        return { benchMap, solvers };
+    }
+
+    // Renders the Benchmark × Solver matrix table.
+    // jobId — if provided, added as data-matrix-job so solver-col-btn clicks work via existing delegation.
+    function _renderDomainMatrix(benchMap, solvers, jobId) {
+        if (!benchMap.size)
+            return '<p style="padding:24px; font-size:12px; color:#9ca3af; font-style:italic;">No pairs found for this domain.</p>';
+
+        const matrixAttr = jobId ? ` data-matrix-job="${_esc(String(jobId))}"` : '';
+
+        const TH_CORNER = 'padding:6px 10px; font-size:11px; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:.04em; text-align:left; position:sticky; left:0; top:0; background:#f9fafb; border-right:1px solid #e5e7eb; z-index:30; white-space:nowrap;';
+        const TH_SOLVER = 'padding:6px 8px; font-size:11px; font-weight:500; color:#6b7280; text-transform:uppercase; letter-spacing:.04em; white-space:nowrap; text-align:center; border-left:1px solid #e5e7eb;';
+        const COL_BTN   = 'all:unset; cursor:pointer; display:block; text-align:center; color:inherit; text-decoration:underline; text-decoration-color:#d1d5db; text-underline-offset:2px; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+        const TD_BENCH  = 'padding:5px 10px; font-size:11px; font-weight:600; color:#374151; position:sticky; left:0; background:#fff; border-right:1px solid #e5e7eb; z-index:10; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+        const BENCH_A   = 'color:#2563eb; text-decoration:underline; text-decoration-color:#bfdbfe; text-underline-offset:2px; cursor:pointer;';
+        const CELL_BASE = 'padding:5px 8px; text-align:center; font-size:11px; border-left:1px solid #f3f4f6; vertical-align:middle;';
+        const EMPTY_CELL = `<td style="${CELL_BASE} color:#d1d5db;">—</td>`;
+
+        const headerCells = solvers.map(s => {
+            const sid   = solverIdMap.get(normalizeName(s));
+            const inner = `<div style="max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${_esc(s)}">${_esc(s)}</div>`;
+            return sid
+                ? `<th scope="col" style="${TH_SOLVER}"><button class="solver-col-btn" style="${COL_BTN}" data-solver-id="${_esc(sid)}" data-solver-name="${_esc(s)}">${inner}</button></th>`
+                : `<th scope="col" style="${TH_SOLVER}">${inner}</th>`;
+        }).join('');
+
+        const bodyRows = [...benchMap.entries()].map(([benchName, { benchId, solvers: solverMap }]) => {
+            const nameEl = benchId
+                ? `<a href="#" class="benchmark-info-trigger" style="${BENCH_A}" data-benchmark-id="${_esc(benchId)}" data-benchmark-name="${_esc(benchName)}" title="${_esc(benchName)}">${_esc(benchName)}</a>`
+                : `<span title="${_esc(benchName)}">${_esc(benchName)}</span>`;
+
+            const cells = solvers.map(s => {
+                const pair = solverMap.get(s);
+                if (!pair) return EMPTY_CELL;
+                const { result, wallclock, config } = pair;
+                return `<td style="${_pairResultStyle(result)} ${CELL_BASE}">
+                    <div style="font-weight:600;">${_esc(result)}</div>
+                    <div style="font-size:9px; color:#6b7280; margin-top:1px; white-space:nowrap;">${_esc(wallclock)}s · ${_esc(config)}</div>
+                </td>`;
+            }).join('');
+
+            return `<tr style="border-bottom:1px solid #f3f4f6; transition:background .1s;" onmouseover="this.style.background='#fafafa'" onmouseout="this.style.background=''">
+                <td style="${TD_BENCH}">${nameEl}</td>${cells}
+            </tr>`;
+        }).join('');
+
+        return `<table${matrixAttr} style="min-width:100%; border-collapse:collapse;">
+            <thead style="position:sticky; top:0; z-index:20; background:#f9fafb; border-bottom:2px solid #e5e7eb;">
+                <tr>
+                    <th scope="col" style="${TH_CORNER}">Benchmark&nbsp;╲&nbsp;Solver</th>
+                    ${headerCells}
+                </tr>
+            </thead>
+            <tbody>${bodyRows}</tbody>
+        </table>`;
+    }
+
+    // Opens the domain matrix modal: fetches all pairs for a job-space, groups by
+    // benchmark, then renders a Benchmark (rows) × Solver (columns) matrix.
+    // jobSpaceId — the StarExec job-space ID (same as data-job-space-id on domain-row-btn)
+    // spaceName  — display name shown in the modal header
+    // jobId      — overall job ID (optional); enables solver-header click-through
+    async function _showDomainMatrixModal(jobSpaceId, spaceName, jobId) {
+        const PAGE_SIZE = 500;
+
+        _domainMatrixModalTitle.textContent = spaceName || 'Domain Matrix';
+        _domainMatrixModalBody.className = 'flex-1 min-h-0 flex flex-col overflow-hidden';
+        _domainMatrixModalBody.innerHTML = `
+            <div class="flex items-center justify-center h-full text-gray-400">
+                <div class="text-center py-12">
+                    <i class="fas fa-circle-notch fa-spin text-3xl mb-3"></i>
+                    <p class="text-sm mt-2">Fetching job pairs…</p>
+                </div>
+            </div>`;
+        _domainMatrixModal.classList.remove('hidden');
+
+        try {
+            const body = new URLSearchParams({
+                sEcho: '1', iDisplayStart: '0',
+                iDisplayLength: String(PAGE_SIZE), iSortCol_0: '0',
+            });
+            const data    = await _apiFetch(
+                `/starexec/services/jobs/pairs/pagination/${jobSpaceId}/true/false/1`,
+                { method: 'POST', body }
+            );
+            const rawRows = data?.aaData ?? [];
+            const total   = data?.iTotalDisplayRecords ?? data?.iTotalRecords ?? rawRows.length;
+
+            if (!rawRows.length) {
+                _domainMatrixModalBody.innerHTML = '<p style="padding:32px; font-size:12px; color:#9ca3af; font-style:italic;">No job pairs found for this domain.</p>';
+                return;
+            }
+
+            const { benchMap, solvers } = _groupPairsByBenchmark(rawRows);
+
+            // Clear body; add optional truncation banner + scrollable table.
+            _domainMatrixModalBody.innerHTML = '';
+
+            if (total > PAGE_SIZE) {
+                const banner = document.createElement('div');
+                banner.style.cssText = 'padding:5px 16px; background:#fffbeb; border-bottom:1px solid #fde68a; font-size:11px; color:#92400e; flex-shrink:0;';
+                banner.innerHTML = `<i class="fas fa-info-circle mr-1"></i>Showing first <strong>${PAGE_SIZE.toLocaleString()}</strong> of <strong>${total.toLocaleString()}</strong> pairs — matrix may be incomplete.`;
+                _domainMatrixModalBody.appendChild(banner);
+            }
+
+            const scroll = document.createElement('div');
+            scroll.style.cssText = 'flex:1; min-height:0; overflow:auto;';
+            scroll.innerHTML = _renderDomainMatrix(benchMap, solvers, jobId);
+            _domainMatrixModalBody.appendChild(scroll);
+
+        } catch (err) {
+            _domainMatrixModalBody.innerHTML = `
+                <div class="flex items-center gap-2 text-red-400 text-sm p-8">
+                    <i class="fas fa-exclamation-circle"></i>
+                    Could not load domain matrix: ${_esc(err.message)}
+                </div>`;
+        }
+    }
 </script>
 </body>
 </html>

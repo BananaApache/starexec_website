@@ -2451,7 +2451,10 @@
 
         // ── <tbody> — one <tr class="dm-row"> per benchmark ─────────────────────────
         const trParts = [];
-        for (const [, entry] of benchMap) {
+        const _sortedBenchEntries = [...benchMap.values()].sort((a, b) =>
+            a.benchName.localeCompare(b.benchName, undefined, { numeric: true, sensitivity: 'base' })
+        );
+        for (const entry of _sortedBenchEntries) {
             const { benchName, benchId, pairMap } = entry;
 
             // First <td>: sticky benchmark name column.

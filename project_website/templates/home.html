@@ -676,6 +676,15 @@
                 cell.addEventListener('animationend', () => cell.classList.remove('cell-just-updated'), { once: true });
             });
             domRow.classList.remove('matrix-row-loading');
+            // Replace any solver cells that still show a loading spinner.
+            // This covers two cases: (a) the domain returned empty aaData, or
+            // (b) the domain had data but not for every solver in the header.
+            for (const cell of domRow.querySelectorAll('td[data-solver-cell]')) {
+                if (cell.querySelector('.fa-circle-notch')) {
+                    cell.innerHTML = '&#8212;';
+                    cell.setAttribute('style', 'padding:5px 8px; text-align:center; font-size:11px; border-left:1px solid #f3f4f6; color:#d1d5db;');
+                }
+            }
         };
 
         // Phase 2: pooled fetch for all spaces not yet visited.
@@ -2566,7 +2575,12 @@
             const { rows: allRows } = await _fetchAllDomainPairs(jobSpaceId);
 
             if (!allRows.length) {
-                if (_dmStatusBar) _dmStatusBar.style.display = 'none';
+                if (_dmStatusBar && _dmStatusText) {
+                    _dmStatusBar.style.display = 'flex';
+                    _dmStatusText.innerHTML =
+                        '<i class="fas fa-circle-check" style="color:#16a34a;margin-right:5px;"></i>' +
+                        'Showing all\u00a0<span style="font-family:ui-monospace,monospace;font-weight:600;color:#111827;">0</span>\u00a0entries';
+                }
                 _domainMatrixModalBody.innerHTML = '<p style="padding:32px; font-size:12px; color:#9ca3af; font-style:italic;">No job pairs found for this domain.</p>';
                 return;
             }

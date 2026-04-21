@@ -310,7 +310,12 @@
 
             <!-- Run Mode selector -->
             <div>
-                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Run Mode</label>
+                <div class="flex items-center gap-2 mb-2">
+                    <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Run Mode</label>
+                    <span id="cj-mode-loading" class="hidden items-center gap-1 text-[10px] text-gray-400">
+                        <i class="fas fa-circle-notch fa-spin text-[9px]"></i> checking space&hellip;
+                    </span>
+                </div>
                 <div id="cj-mode-grid" class="grid grid-cols-3 gap-2">
                     <button type="button" data-run="keepHierarchy" data-bench="runAllBenchInHierarchy"
                         class="cj-mode-btn px-3 py-2.5 rounded-lg border-2 text-left transition-all">
@@ -1467,8 +1472,43 @@
     }
 
     // ── Create Job – mode / solver / benchmark state ─────────────────────────
-    let _cjSolverData = [];  // [{id, name}]
-    let _cjBenchData  = [];  // [{id, name}]
+    let _cjSolverData = [];   // [{id, name}]
+    let _cjBenchData  = [];   // [{id, name}]
+    let _cjIsLeaf     = false; // whether the current space has no child spaces
+
+    // Apply isLeaf result to the mode grid:
+    //  - non-leaf: hide "Choose Solvers & Benchmarks", switch to 2-col grid,
+    //              "Choose Solvers" maps to runAllBenchInHierarchy
+    //  - leaf:     show all 3 options, "Choose Solvers" maps to runAllBenchInSpace
+    function _applyCjLeafStatus(isLeaf) {
+        _cjIsLeaf = isLeaf;
+        const grid             = document.getElementById('cj-mode-grid');
+        const chooseSolversBtn = grid.querySelector('[data-run="choose"]:not([data-bench="runChosenFromSpace"])');
+        const chooseBothBtn    = grid.querySelector('[data-bench="runChosenFromSpace"]');
+
+        // Update "Choose Solvers" bench target based on leaf status
+        if (chooseSolversBtn) {
+            chooseSolversBtn.dataset.bench = isLeaf ? 'runAllBenchInSpace' : 'runAllBenchInHierarchy';
+        }
+
+        // Show / hide the 3rd option and resize the grid accordingly
+        if (chooseBothBtn) chooseBothBtn.classList.toggle('hidden', !isLeaf);
+        grid.classList.toggle('grid-cols-3', isLeaf);
+        grid.classList.toggle('grid-cols-2', !isLeaf);
+
+        // If the "Choose Both" card was active and space is not a leaf, revert to Run All
+        const currentBench = document.getElementById('cj-benchchoice-input').value;
+        if (!isLeaf && currentBench === 'runChosenFromSpace') {
+            const firstBtn = grid.querySelector('.cj-mode-btn:not(.hidden)');
+            if (firstBtn) _applyCjMode(firstBtn);
+        }
+
+        // If "Choose Solvers" is the active mode, refresh its benchChoice to the new value
+        const currentRun = document.getElementById('cj-runchoice-input').value;
+        if (currentRun === 'choose' && currentBench !== 'runChosenFromSpace' && chooseSolversBtn) {
+            document.getElementById('cj-benchchoice-input').value = chooseSolversBtn.dataset.bench;
+        }
+    }
 
     function _setCjModeActive(activeBtn) {
         document.querySelectorAll('.cj-mode-btn').forEach(btn => {
@@ -1586,11 +1626,23 @@
         msgEl.textContent = '';
         document.getElementById('create-job-modal').classList.remove('hidden');
 
-        // Reset mode to "Run All" (first card)
+        // Reset mode to "Run All" (first card); leaf status unknown until fetch resolves
         _cjSolverData = [];
         _cjBenchData  = [];
+        _cjIsLeaf     = false;
         const firstModeBtn = document.querySelector('.cj-mode-btn');
         if (firstModeBtn) _applyCjMode(firstModeBtn);
+        // While we don't know leaf status yet, show all 3 options but disable mode grid
+        const grid = document.getElementById('cj-mode-grid');
+        const modeLoadingEl = document.getElementById('cj-mode-loading');
+        grid.classList.add('grid-cols-3');
+        grid.classList.remove('grid-cols-2');
+        document.querySelectorAll('.cj-mode-btn').forEach(btn => {
+            btn.classList.remove('hidden');
+            btn.disabled = true;
+            btn.classList.add('opacity-50', 'cursor-not-allowed');
+        });
+        if (modeLoadingEl) modeLoadingEl.style.display = 'inline-flex';
         document.getElementById('cj-solver-list').innerHTML = '<span class="text-gray-400 text-xs">Loading solvers...</span>';
         document.getElementById('cj-bench-list').innerHTML  = '<span class="text-gray-400 text-xs">Loading benchmarks...</span>';
         document.getElementById('cj-bench-search').value   = '';
@@ -1688,7 +1740,26 @@
             }
         })();
 
-        Promise.allSettled([queuePromise, processorPromise, solverPromise]).then(() => {
+        // Fetch leaf status — determines which mode options are available
+        const leafPromise = _apiFetch(`/starexec/services/space/isLeaf/${spaceId}`)
+            .then(result => {
+                // Endpoint may return bare true/false JSON or a wrapped object
+                const isLeaf = result === true || result?.isLeaf === true;
+                _applyCjLeafStatus(isLeaf);
+            })
+            .catch(() => {
+                // On error, default to non-leaf (conservative: hide "Choose Both")
+                _applyCjLeafStatus(false);
+            })
+            .finally(() => {
+                if (modeLoadingEl) modeLoadingEl.style.display = 'none';
+                document.querySelectorAll('.cj-mode-btn').forEach(btn => {
+                    btn.disabled = false;
+                    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                });
+            });
+
+        Promise.allSettled([queuePromise, processorPromise, solverPromise, leafPromise]).then(() => {
             submitBtn.disabled = false;
         });
     }
@@ -1726,7 +1797,7 @@
         // --- Create Job: mode card clicks ---
         document.getElementById('cj-mode-grid').addEventListener('click', function(e) {
             const btn = e.target.closest('.cj-mode-btn');
-            if (!btn) return;
+            if (!btn || btn.disabled) return;
             _applyCjMode(btn);
             // If switching to "Choose Benchmarks", trigger benchmark load if not yet loaded
             if (btn.dataset.bench === 'runChosenFromSpace' && _cjBenchData.length === 0) {

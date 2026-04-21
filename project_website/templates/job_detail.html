@@ -12,68 +12,83 @@
     <script src="https://kit.fontawesome.com/65a259d37d.js" crossorigin="anonymous"></script>
     <style>
         body {
-            background: -webkit-radial-gradient(35.49% -18.37%, 55.87% 55.87%, #d1aad7 0%, rgba(255, 255, 255, 0) 100%),
-                        -webkit-radial-gradient(-24.53% -16.02%, 70.81% 48.44%, #c88bc4 0%, rgba(255, 255, 255, 0) 100%),
-                        -webkit-radial-gradient(104.86% -43.36%, 91.61% 92.58%, #7b8fdd 0%, rgba(255, 255, 255, 0) 100%),
-                        -webkit-radial-gradient(-2.99% -8.69%, 50.59% 55.55%, #86bff2 9.06%, rgba(255, 255, 255, 0) 100%),
-                        #f7fafc;
+            background:
+                -webkit-radial-gradient(35.49% -18.37%, 55.87% 55.87%, #d1aad7 0%, rgba(255,255,255,0) 100%),
+                -webkit-radial-gradient(-24.53% -16.02%, 70.81% 48.44%, #c88bc4 0%, rgba(255,255,255,0) 100%),
+                -webkit-radial-gradient(104.86% -43.36%, 91.61% 92.58%, #7b8fdd 0%, rgba(255,255,255,0) 100%),
+                -webkit-radial-gradient(-2.99% -8.69%, 50.59% 55.55%, #86bff2 9.06%, rgba(255,255,255,0) 100%),
+                #f7fafc;
             background-attachment: fixed;
             font-family: 'Inter', sans-serif;
         }
-        .arrow-icon { transition: transform 0.2s ease; }
+        /* Row hover for domain matrix — injected here to avoid inline handler quote issues */
+        tr.dm-row:hover td { background-color: #fafafa !important; }
     </style>
 </head>
 <body class="antialiased text-gray-800 min-h-screen">
 
-    <div class="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-
-        <!-- Top nav -->
-        <nav class="flex items-center justify-between mb-6">
-            <a href="{% url 'home' %}"
-               class="flex items-center text-sm font-medium text-gray-700 bg-white/70 backdrop-blur-sm py-2 px-4 rounded-lg shadow-sm hover:text-blue-600 hover:shadow-md transition-all">
-                <i class="fas fa-arrow-left mr-2"></i> Dashboard
-            </a>
-        </nav>
-
-        <!-- Main card -->
-        <div class="bg-white/80 backdrop-blur-lg rounded-2xl shadow-xl overflow-hidden">
-
-            <!-- Card header -->
-            <div class="px-6 py-4 border-b border-gray-200/60 bg-gray-50/50 shrink-0">
-                <div class="flex items-center gap-3">
-                    <h1 id="job-title" class="text-lg font-bold text-gray-900">
-                        <span class="text-gray-400 font-normal">Job</span> {{ job_id }}
-                    </h1>
-                </div>
-            </div>
-
-            <!-- Content — JS replaces this with stat grid + pairs accordion -->
-            <div id="job-content" class="p-6 sm:p-8">
-                <div class="flex items-center justify-center py-16 text-gray-400">
-                    <i class="fas fa-circle-notch fa-spin text-2xl mr-3 text-blue-400"></i>
-                    <span>Loading job details...</span>
-                </div>
-            </div>
-
+<!-- Benchmark Detail Modal (dark, same as home.html) -->
+<div id="benchmark-modal" class="fixed inset-0 hidden flex items-center justify-center z-[60] p-4"
+     style="background:rgba(15,23,42,0.72); backdrop-filter:blur(5px);">
+    <div class="w-full max-h-[88vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+         style="background:#0f172a; max-width:800px;">
+        <div id="benchmark-modal-inner" class="flex flex-col min-h-0 h-full">
+            <!-- Content injected by _showBenchmarkModal -->
         </div>
     </div>
+</div>
+
+<div class="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+
+    <!-- Top nav -->
+    <nav class="flex items-center justify-between mb-6">
+        <a href="{% url 'home' %}"
+           class="flex items-center text-sm font-medium text-gray-700 bg-white/70 backdrop-blur-sm py-2 px-4 rounded-lg shadow-sm hover:text-blue-600 hover:shadow-md transition-all">
+            <i class="fas fa-arrow-left mr-2"></i> Dashboard
+        </a>
+    </nav>
+
+    <!-- Main card (no overflow-hidden so position:sticky works with page scroll) -->
+    <div class="bg-white/80 backdrop-blur-lg rounded-2xl shadow-xl">
+
+        <!-- Card header -->
+        <div class="px-6 py-4 border-b border-gray-200/60 bg-gray-50/50 rounded-t-2xl">
+            <div class="flex items-center gap-3">
+                <h1 id="job-title" class="text-lg font-bold text-gray-900">
+                    <span class="text-gray-400 font-normal">Job</span> {{ job_id }}
+                </h1>
+            </div>
+        </div>
+
+        <!-- Content area — JS replaces this with stat grid + space matrices -->
+        <div id="job-content" class="p-6 sm:p-8">
+            <div class="flex items-center justify-center py-16 text-gray-400">
+                <i class="fas fa-circle-notch fa-spin text-2xl mr-3 text-blue-400"></i>
+                <span>Loading job details...</span>
+            </div>
+        </div>
+
+    </div>
+</div>
 
 <script>
     const JOB_ID       = {{ job_id }};
     const STAREXEC_URL = "{{ starexec_url }}";
 
-    const _pairDataCache = new Map();  // spaceId → resolved rows
-    const _pairInflight  = new Map();  // spaceId → in-flight Promise
+    // Global solver-name → StarExec ID map, populated while grouping pairs.
+    const solverIdMap = new Map();
 
-    // ---- Shared helpers (mirrors home.html) ----
+    // ── Core helpers ────────────────────────────────────────────────────────────
 
     function _csrfToken() {
-        const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
-        return match ? match[1] : '';
+        const m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+        return m ? m[1] : '';
     }
 
     function _esc(str) {
-        return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        return String(str ?? '')
+            .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+            .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
     function _statCard(label, value) {
@@ -89,13 +104,10 @@
         if (!ts) return 'none';
         const d = new Date(ts);
         const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-        const day  = String(d.getDate()).padStart(2, '0');
-        let   hr   = d.getHours();
+        let hr = d.getHours();
         const ampm = hr >= 12 ? 'PM' : 'AM';
         hr = hr % 12 || 12;
-        const mm   = String(d.getMinutes()).padStart(2, '0');
-        const ss   = String(d.getSeconds()).padStart(2, '0');
-        return `${MON[d.getMonth()]} ${day} ${d.getFullYear()} ${String(hr).padStart(2,'0')}:${mm}:${ss} ${ampm}`;
+        return `${MON[d.getMonth()]} ${String(d.getDate()).padStart(2,'0')} ${d.getFullYear()} ${String(hr).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')} ${ampm}`;
     }
 
     function _jobStatus(job) {
@@ -104,16 +116,9 @@
         return 'Incomplete';
     }
 
-    // Single StarExec services request via the thin Django proxy.
-    // POST requests carry no timeout — pagination can be slow.
     async function _apiFetch(path, options = {}) {
-        const headers = options.method === 'POST'
-            ? { 'X-CSRFToken': _csrfToken() }
-            : {};
-        const r = await fetch(
-            `/api/proxy/?target=${encodeURIComponent(path)}`,
-            { ...options, headers }
-        );
+        const headers = options.method === 'POST' ? { 'X-CSRFToken': _csrfToken() } : {};
+        const r = await fetch(`/api/proxy/?target=${encodeURIComponent(path)}`, { ...options, headers });
         if (!r.ok) {
             const d = await r.json().catch(() => ({}));
             throw new Error(d.error || `HTTP ${r.status}`);
@@ -121,114 +126,404 @@
         return r.json();
     }
 
-    // Tier 1: fetch the flat list of spaces for a job (steps 1 + 2 of waterfall).
     async function _fetchJobSpaces(jobId) {
-        function _sid(node) { return node?.id ?? node?.attr?.id ?? null; }
-
-        const jobspaces = await _apiFetch(
-            `/starexec/services/space/${jobId}/jobspaces/false`
-        );
+        function _sid(n) { return n?.id ?? n?.attr?.id ?? null; }
+        const jobspaces = await _apiFetch(`/starexec/services/space/${jobId}/jobspaces/false`);
         if (!Array.isArray(jobspaces) || !jobspaces.length) return [];
-
         const rootId = _sid(jobspaces[0]);
         if (!rootId) return [];
-
-        const children = await _apiFetch(
-            `/starexec/services/space/${jobId}/jobspaces/false?id=${rootId}`
-        );
+        const children = await _apiFetch(`/starexec/services/space/${jobId}/jobspaces/false?id=${rootId}`);
         const raw = (Array.isArray(children) && children.length) ? children : [jobspaces[0]];
-
-        return raw
-            .map(s => ({ spaceId: _sid(s), spaceName: s?.data ?? s?.name ?? '?' }))
-            .filter(s => s.spaceId);
+        return raw.map(s => ({ spaceId: _sid(s), spaceName: s?.data ?? s?.name ?? '?' })).filter(s => s.spaceId);
     }
 
-    // Tier 2: fetch pairs for one space, with cache + in-flight deduplication.
-    function _fetchSpacePairs(spaceId) {
-        if (_pairDataCache.has(spaceId)) return Promise.resolve(_pairDataCache.get(spaceId));
-        if (_pairInflight.has(spaceId))  return _pairInflight.get(spaceId);
+    // ── Matrix helpers (mirrors home.html) ──────────────────────────────────────
 
-        const body = new URLSearchParams({
-            sEcho: '1', iDisplayStart: '0', iDisplayLength: '200', iSortCol_0: '0',
-        });
-        const promise = _apiFetch(
-            `/starexec/services/jobs/solvers/pagination/${spaceId}/true/true/1/false`,
-            { method: 'POST', body }
-        ).then(data => {
-            const rows = data?.aaData ?? [];
-            _pairDataCache.set(spaceId, rows);
-            _pairInflight.delete(spaceId);
-            return rows;
-        }).catch(err => {
-            _pairInflight.delete(spaceId);
-            throw err;
-        });
-
-        _pairInflight.set(spaceId, promise);
-        return promise;
+    function normalizeName(str) {
+        return String(str).toLowerCase().replace(/[^a-z0-9]/g, '');
     }
 
-    function _renderSpacesList(spaces) {
-        if (!spaces.length) {
-            return '<p class="text-gray-400 text-sm py-2 italic">No job pairs found.</p>';
+    function _extractText(html) {
+        try {
+            return new DOMParser().parseFromString(String(html), 'text/html').body.textContent?.trim() || '';
+        } catch (_) { return String(html).trim(); }
+    }
+
+    function _extractHref(html) {
+        try {
+            const a = new DOMParser().parseFromString(String(html), 'text/html').body.querySelector('a[href]');
+            return a ? a.getAttribute('href') : null;
+        } catch (_) { return null; }
+    }
+
+    function _pairResultStyle(result) {
+        if (!result || result === '\u2014') return 'background:#f9fafb; color:#9ca3af;';
+        const r = result.toString().toLowerCase().trim();
+        if (['sat','unsat','theorem','valid','unsatisfiable','satisfiable','true','yes','proved'].includes(r))
+            return 'background:#d1fae5; color:#065f46; font-weight:600;';
+        if (r === 'wrong')
+            return 'background:#fca5a5; color:#7f1d1d; font-weight:700;';
+        if (['timeout','memout','cpu-limit','memory-limit','wall-limit'].includes(r))
+            return 'background:#fee2e2; color:#991b1b;';
+        if (['error','crash','failed'].includes(r))
+            return 'background:#fef3c7; color:#92400e;';
+        if (['starexec-unknown','unknown','skip','no-output'].includes(r))
+            return 'background:#f9fafb; color:#9ca3af;';
+        return 'background:#eff6ff; color:#1e40af;';
+    }
+
+    // Groups raw pairs/pagination rows into a Map<benchKey, {benchName,benchId,pairMap}>.
+    // Also populates solverIdMap as a side-effect.
+    function _groupPairsByBenchmark(rawRows) {
+        const benchMap  = new Map();
+        const solverSet = new Set();
+
+        for (const row of rawRows) {
+            const benchHtml  = String(row[0] ?? '');
+            const solverHtml = String(row[1] ?? '');
+            const configHtml = String(row[2] ?? '');
+            const status     = _extractText(String(row[3] ?? '')) || '\u2014';
+            const wallclock  = _extractText(String(row[4] ?? '')) || '\u2014';
+            const result     = _extractText(String(row[5] ?? '')) || '\u2014';
+
+            const benchName = _extractText(benchHtml) || '(unknown)';
+            const benchHref = _extractHref(benchHtml);
+            const benchIdM  = benchHref?.match(/[?&]id=(\d+)/);
+            const benchId   = benchIdM ? benchIdM[1] : null;
+            const benchKey  = benchId ?? benchName;
+
+            const solverName = _extractText(solverHtml) || '(unknown)';
+            const solverHref = _extractHref(solverHtml);
+            const solverIdM  = solverHref?.match(/[?&]id=(\d+)/);
+            const solverId   = solverIdM ? solverIdM[1] : (solverIdMap.get(normalizeName(solverName)) ?? null);
+            if (solverId) {
+                const norm = normalizeName(solverName);
+                if (!solverIdMap.has(norm)) solverIdMap.set(norm, solverId);
+            }
+            const configName = _extractText(configHtml) || '\u2014';
+
+            if (!benchMap.has(benchKey))
+                benchMap.set(benchKey, { benchName, benchId, pairMap: new Map() });
+            const entry = benchMap.get(benchKey);
+            if (!entry.benchId && benchId) entry.benchId = benchId;
+            solverSet.add(solverName);
+            if (!entry.pairMap.has(solverName))
+                entry.pairMap.set(solverName, { result, status, wallclock, config: configName, solverId });
         }
-        return spaces.map(({ spaceId, spaceName }) => `
-            <div class="pair-space-row rounded-lg border border-gray-200 overflow-hidden mb-2">
-                <button class="pair-space-header w-full flex items-center px-4 py-3 bg-gray-50 hover:bg-gray-100 text-left transition-colors" data-space-id="${spaceId}">
-                    <svg class="arrow-icon w-3 h-3 text-gray-400 mr-3 shrink-0 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-                    </svg>
-                    <span class="text-sm font-medium text-gray-700">${_esc(spaceName)}</span>
-                    <span class="ml-auto text-xs text-gray-400">click to load</span>
-                </button>
-                <div class="pair-space-detail hidden"></div>
-            </div>`).join('');
+
+        const solvers = [...solverSet].sort((a, b) => a.localeCompare(b));
+        return { benchMap, solvers };
     }
 
-    function _renderPairRows(rows) {
-        if (!rows.length) {
-            return '<p class="text-gray-400 text-sm px-4 py-3 italic">No pairs found for this space.</p>';
-        }
-        const trs = rows.map(row => {
-            const solver = String(row[2] ?? '').replace(
-                /<img[^>]*src="\/starexec\/images\/external\.png"[^>]*>/g,
-                ' <i class="fas fa-arrow-up-right-from-square text-blue-400 text-xs"></i>'
+    // Renders a Benchmark (rows) x Solver (columns) matrix.
+    // Uses wider columns than the modal version to exploit full-page real estate.
+    function _renderDomainMatrix(benchMap, solvers) {
+        if (!benchMap.size)
+            return '<p style="padding:24px; font-size:12px; color:#9ca3af; font-style:italic;">No pairs found for this space.</p>';
+
+        const BENCH_W  = 200;
+        const SOLVER_W = 150;
+
+        const TH_CORNER = [
+            'padding:6px 10px','font-size:11px','font-weight:600','color:#6b7280',
+            'text-transform:uppercase','letter-spacing:.04em','text-align:left',
+            'position:sticky','left:0','top:0','background:#f9fafb',
+            'border-right:1px solid #e5e7eb','z-index:30','white-space:nowrap',
+            'width:'+BENCH_W+'px',
+        ].join(';')+';';
+
+        const TH_SOLVER = [
+            'padding:6px 8px','font-size:11px','font-weight:500','color:#6b7280',
+            'text-transform:uppercase','letter-spacing:.04em','text-align:center',
+            'border-left:1px solid #e5e7eb','position:sticky','top:0','background:#f9fafb',
+            'width:'+SOLVER_W+'px',
+        ].join(';')+';';
+
+        const COL_BTN = [
+            'all:unset','cursor:pointer','display:block','width:100%',
+            'text-align:center','color:inherit',
+            'text-decoration:underline','text-decoration-color:#d1d5db',
+            'text-underline-offset:2px','overflow:hidden',
+            'text-overflow:ellipsis','white-space:nowrap',
+        ].join(';')+';';
+
+        const TD_BENCH = [
+            'padding:5px 10px','font-size:11px','font-weight:600','color:#374151',
+            'position:sticky','left:0','background:#fff',
+            'border-right:1px solid #e5e7eb','z-index:10',
+            'width:'+BENCH_W+'px','max-width:'+BENCH_W+'px',
+            'overflow:hidden','text-overflow:ellipsis','white-space:nowrap',
+        ].join(';')+';';
+
+        const BENCH_A = [
+            'color:#2563eb','text-decoration:underline',
+            'text-decoration-color:#bfdbfe','text-underline-offset:2px','cursor:pointer',
+        ].join(';')+';';
+
+        const CELL = [
+            'padding:5px 8px','text-align:center','font-size:11px',
+            'border-left:1px solid #f3f4f6','vertical-align:middle',
+            'width:'+SOLVER_W+'px','max-width:'+SOLVER_W+'px','overflow:hidden',
+        ].join(';')+';';
+
+        const EMPTY_CELL = '<td style="'+CELL+'color:#d1d5db;">&#8212;</td>';
+
+        // <colgroup>
+        const colTags = ['<col style="width:'+BENCH_W+'px;">'];
+        for (let i = 0; i < solvers.length; i++) colTags.push('<col style="width:'+SOLVER_W+'px;">');
+
+        // <thead>
+        const thCells = ['<th scope="col" style="'+TH_CORNER+'">Benchmark &#8726; Solver</th>'];
+        for (const s of solvers) {
+            const sid   = solverIdMap.get(normalizeName(s));
+            const label = '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+_esc(s)+'">'+_esc(s)+'</div>';
+            thCells.push(sid
+                ? '<th scope="col" style="'+TH_SOLVER+'"><button class="solver-col-btn" style="'+COL_BTN+'" data-solver-id="'+_esc(sid)+'" data-solver-name="'+_esc(s)+'">'+label+'</button></th>'
+                : '<th scope="col" style="'+TH_SOLVER+'">'+label+'</th>'
             );
-            return `<tr class="hover:bg-gray-50 transition-colors">
-                <td class="px-4 py-2 text-gray-800">${solver}</td>
-                <td class="px-4 py-2 text-gray-800">${_esc(String(row[4] ?? ''))}</td>
-                <td class="px-4 py-2 text-gray-800 font-mono">${_esc(String(row[5] ?? ''))}</td>
-            </tr>`;
-        }).join('');
-        return `
-            <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200 text-xs">
-                    <thead class="bg-white border-b border-gray-200">
-                        <tr>
-                            <th class="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider">Solver</th>
-                            <th class="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider">Result</th>
-                            <th class="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider">Pair ID</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-200">${trs}</tbody>
-                </table>
-            </div>`;
+        }
+
+        // <tbody>
+        const trParts = [];
+        const sortedEntries = [...benchMap.values()].sort((a, b) =>
+            a.benchName.localeCompare(b.benchName, undefined, { numeric: true, sensitivity: 'base' })
+        );
+        for (const { benchName, benchId, pairMap } of sortedEntries) {
+            const nameContent = benchId
+                ? '<a href="#" class="benchmark-info-trigger" style="'+BENCH_A+'" data-benchmark-id="'+_esc(benchId)+'" data-benchmark-name="'+_esc(benchName)+'" title="'+_esc(benchName)+'">'+_esc(benchName)+'</a>'
+                : '<span title="'+_esc(benchName)+'">'+_esc(benchName)+'</span>';
+
+            const tdParts = ['<td style="'+TD_BENCH+'">'+nameContent+'</td>'];
+            for (const s of solvers) {
+                const pair = pairMap.get(s);
+                if (!pair) { tdParts.push(EMPTY_CELL); continue; }
+                const { result, status, wallclock, config } = pair;
+                const isComplete = /^complete/i.test(status);
+                const statusLine = isComplete
+                    ? _esc(status)
+                    : '<b><i class="fas fa-triangle-exclamation" style="font-size:8px;margin-right:2px;"></i>'+_esc(status)+'</b>';
+                tdParts.push(
+                    '<td style="'+_pairResultStyle(result)+CELL+'">' +
+                        '<div style="font-weight:bold;">'+_esc(result)+'</div>' +
+                        '<div style="font-size:10px;opacity:0.8;margin-top:2px;white-space:nowrap;">'+statusLine+'&nbsp;|&nbsp;'+_esc(wallclock)+'s</div>' +
+                        '<div style="font-size:9px;color:#6b7280;margin-top:1px;white-space:nowrap;">'+_esc(config)+'</div>' +
+                    '</td>'
+                );
+            }
+            trParts.push('<tr class="dm-row" style="border-bottom:1px solid #f3f4f6;">'+tdParts.join('')+'</tr>');
+        }
+
+        return (
+            // overflow:auto on wrapper enables both horizontal scroll AND sticky headers
+            // (sticky top/left are relative to this scroll container).
+            '<div style="overflow:auto; max-height:70vh; border:1px solid #e5e7eb; border-radius:8px;">' +
+            '<table style="table-layout:fixed; width:100%; border-collapse:collapse;">' +
+            '<colgroup>'+colTags.join('')+'</colgroup>' +
+            '<thead style="background:#f9fafb; border-bottom:2px solid #e5e7eb;">' +
+                '<tr>'+thCells.join('')+'</tr>' +
+            '</thead>' +
+            '<tbody>'+trParts.join('')+'</tbody>' +
+            '</table>' +
+            '</div>' +
+            '<p style="font-size:11px; color:#9ca3af; margin-top:6px;">' +
+                'Result &amp; status per benchmark/solver pair. ' +
+                '<span style="background:#d1fae5; padding:1px 5px; border-radius:3px; font-weight:600; color:#065f46;">correct</span>&nbsp;' +
+                '<span style="background:#fee2e2; padding:1px 5px; border-radius:3px; color:#991b1b;">timeout/memout</span>&nbsp;' +
+                '<span style="background:#fef3c7; padding:1px 5px; border-radius:3px; color:#92400e;">error</span>' +
+            '</p>'
+        );
     }
 
-    // ---- Page bootstrap ----
+    // Auto-chains through all pages (PAGE_SIZE=500) until every pair is loaded.
+    // onProgress(loaded, total) is called after each page.
+    async function _fetchAllSpacePairs(spaceId, onProgress) {
+        const PAGE_SIZE = 500;
+        const url = `/starexec/services/jobs/pairs/pagination/${spaceId}/true/false/1`;
+        const allRows = [];
+        let start = 0;
+        let total = Infinity;
+
+        while (allRows.length < total) {
+            const body = new URLSearchParams({
+                sEcho: '1', iDisplayStart: String(start),
+                iDisplayLength: String(PAGE_SIZE), iSortCol_0: '0',
+            });
+            const data = await _apiFetch(url, { method: 'POST', body });
+            const page = data?.aaData ?? [];
+
+            if (start === 0) {
+                total = data?.iTotalDisplayRecords ?? data?.iTotalRecords ?? page.length;
+                if (total === 0) break;
+            }
+
+            allRows.push(...page);
+            if (onProgress) onProgress(allRows.length, total);
+            if (page.length < PAGE_SIZE) break;
+            start += PAGE_SIZE;
+        }
+
+        return { rows: allRows, total: total === Infinity ? allRows.length : total };
+    }
+
+    // ── Benchmark detail modal ───────────────────────────────────────────────────
+
+    const _benchModal      = document.getElementById('benchmark-modal');
+    const _benchModalInner = document.getElementById('benchmark-modal-inner');
+
+    function _closeBenchmarkModal() { _benchModal.classList.add('hidden'); }
+    _benchModal.addEventListener('click', e => { if (e.target === _benchModal) _closeBenchmarkModal(); });
+
+    async function _showBenchmarkModal(id, name) {
+        _benchModalInner.innerHTML = `
+            <div class="flex-1 flex items-center justify-center py-16">
+                <div class="text-center" style="color:#64748b;">
+                    <i class="fas fa-circle-notch fa-spin text-3xl mb-3" style="color:#38bdf8;"></i>
+                    <p class="text-sm mt-2" style="color:#94a3b8;">Loading benchmark\u2026</p>
+                </div>
+            </div>`;
+        _benchModal.classList.remove('hidden');
+
+        let data;
+        try {
+            data = await _apiFetch(`/starexec/services/benchmarks/${id}/metadata?limit=-1`);
+        } catch (err) {
+            _benchModalInner.innerHTML = `
+                <div class="flex flex-col h-full min-h-0">
+                    <div class="flex items-center justify-between px-5 py-4 shrink-0" style="border-bottom:1px solid #1e293b;">
+                        <span class="text-sm font-semibold" style="color:#f1f5f9;">${_esc(name || 'Benchmark #'+id)}</span>
+                        <button id="bench-close-err" style="color:#64748b;background:none;border:none;cursor:pointer;"><i class="fas fa-times"></i></button>
+                    </div>
+                    <div class="flex-1 flex items-center justify-center p-8" style="color:#f87171; font-size:13px;">
+                        ${_esc(err.message)}
+                    </div>
+                </div>`;
+            document.getElementById('bench-close-err')?.addEventListener('click', _closeBenchmarkModal);
+            return;
+        }
+
+        const bName  = data.name || name || 'Benchmark #'+id;
+        const bId    = data.id ?? id;
+        const bDate  = data.uploadDate || '\u2014';
+        const bType  = data.type
+            ? (typeof data.type === 'object' ? (data.type.name ?? String(data.type.id ?? '\u2014')) : String(data.type))
+            : '\u2014';
+        const bDisk  = (() => {
+            const n = Number(data.diskSize);
+            if (!data.diskSize && data.diskSize !== 0) return '\u2014';
+            if (n < 1024)       return n+' B';
+            if (n < 1048576)    return (n/1024).toFixed(2)+' KB';
+            if (n < 1073741824) return (n/1048576).toFixed(2)+' MB';
+            return (n/1073741824).toFixed(2)+' GB';
+        })();
+        const bOwner = (() => {
+            const o = data.owner;
+            if (!o) return data.userId != null ? String(data.userId) : '\u2014';
+            if (typeof o === 'object') {
+                const fn = [o.firstName, o.lastName].filter(Boolean).join(' ') || '\u2014';
+                return o.email ? fn+' ('+o.email+')' : fn;
+            }
+            return String(o);
+        })();
+        const bAttrsEntries = (() => {
+            const a = data.attributes;
+            if (!a) return [];
+            if (Array.isArray(a)) return a.map(x => typeof x==='object' ? [x.key??x.name??'', x.value??''] : [String(x),'']);
+            if (typeof a==='object') return Object.entries(a);
+            return [];
+        })();
+        const bDeps       = Array.isArray(data.dependencies) ? data.dependencies : [];
+        const bRawContent = data.contents ?? data.content ?? null;
+        const bContent    = (bRawContent != null && String(bRawContent).trim().length > 0) ? String(bRawContent) : null;
+
+        const DT = 'style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#475569;padding:4px 12px 2px 0;white-space:nowrap;vertical-align:top;"';
+        const DD = 'style="font-size:11px;font-family:ui-monospace,monospace;color:#e2e8f0;padding:4px 0 2px 0;"';
+
+        const coreHtml = `<dl style="display:grid;grid-template-columns:auto 1fr;row-gap:0;column-gap:8px;">
+            <dt ${DT}>Name</dt>       <dd ${DD}>${_esc(bName)}</dd>
+            <dt ${DT}>ID</dt>         <dd ${DD}>#${_esc(String(bId))}</dd>
+            <dt ${DT}>Owner</dt>      <dd ${DD}>${_esc(bOwner)}</dd>
+            <dt ${DT}>Upload Date</dt><dd ${DD}>${_esc(bDate)}</dd>
+            <dt ${DT}>Type</dt>       <dd ${DD}>${_esc(bType)}</dd>
+            <dt ${DT}>Disk Size</dt>  <dd ${DD}>${_esc(String(bDisk))}</dd>
+        </dl>`;
+
+        const attrsHtml = bAttrsEntries.length
+            ? '<dl style="display:grid;grid-template-columns:auto 1fr;row-gap:0;column-gap:8px;margin:0;">' +
+              bAttrsEntries.map(([k,v]) => `<dt ${DT}>${_esc(String(k))}</dt><dd ${DD}>${_esc(String(v))}</dd>`).join('') +
+              '</dl>'
+            : '<span style="font-size:11px;font-style:italic;color:#475569;">No attributes.</span>';
+
+        const depsHtml = bDeps.length
+            ? '<ul style="margin:0;padding:0;list-style:none;">' +
+              bDeps.map(dep => {
+                  const p = typeof dep==='object' ? (dep.dependencyPath??dep.path??JSON.stringify(dep)) : String(dep);
+                  return '<li style="font-size:11px;font-family:ui-monospace,monospace;color:#a3e635;padding:2px 0;word-break:break-all;">'+_esc(String(p))+'</li>';
+              }).join('') + '</ul>'
+            : null;
+
+        const contentHtml = bContent
+            ? '<pre style="margin:0;padding:12px 14px;background:#020617;color:#4ade80;font-family:Consolas,ui-monospace,monospace;font-size:11px;line-height:1.6;white-space:pre-wrap;word-break:break-all;border-radius:8px;border:1px solid #1e293b;max-height:500px;overflow-y:auto;">'+_esc(bContent)+'</pre>'
+            : '<p style="margin:0;font-size:12px;font-style:italic;color:#475569;">No content available.</p>';
+
+        _benchModalInner.innerHTML = `
+            <div class="flex flex-col h-full min-h-0">
+                <div class="shrink-0 px-5 py-4 flex items-start justify-between gap-4" style="border-bottom:1px solid #1e293b;background:#0f172a;">
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-2 mb-1">
+                            <i class="fas fa-file-code text-xs" style="color:#38bdf8;"></i>
+                            <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#475569;">Benchmark</span>
+                            <span style="font-size:10px;padding:1px 6px;border-radius:4px;background:#1e293b;color:#64748b;border:1px solid #334155;">#${_esc(String(bId))}</span>
+                        </div>
+                        <h2 class="truncate" style="font-size:13px;font-weight:700;color:#f1f5f9;" title="${_esc(bName)}">${_esc(bName)}</h2>
+                    </div>
+                    <button id="bench-modal-close-btn" style="color:#475569;flex-shrink:0;margin-top:2px;background:none;border:none;cursor:pointer;font-size:14px;" class="hover:text-white transition-colors">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="flex-1 overflow-auto min-h-0" style="background:#0f172a;">
+                    <div style="padding:14px 20px 12px;border-bottom:1px solid #1e293b;">
+                        <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#334155;margin:0 0 8px 0;">Core Info</p>
+                        ${coreHtml}
+                    </div>
+                    <div style="padding:14px 20px 12px;border-bottom:1px solid #1e293b;background:#0c1525;">
+                        <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#334155;margin:0 0 8px 0;">Attributes</p>
+                        ${attrsHtml}
+                    </div>
+                    ${depsHtml ? `<div style="padding:14px 20px 12px;border-bottom:1px solid #1e293b;"><p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#334155;margin:0 0 8px 0;">Dependencies</p>${depsHtml}</div>` : ''}
+                    <div style="padding:14px 20px 16px;">
+                        <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#334155;margin:0 0 8px 0;">Content</p>
+                        ${contentHtml}
+                    </div>
+                </div>
+                <div class="shrink-0 px-5 py-3 flex items-center justify-between" style="border-top:1px solid #1e293b;background:#0f172a;">
+                    <button id="bench-modal-back-btn" class="flex items-center gap-2 transition-colors"
+                            style="font-size:11px;font-weight:600;padding:5px 12px;border-radius:6px;color:#94a3b8;background:#1e293b;border:1px solid #334155;cursor:pointer;">
+                        <i class="fas fa-arrow-left" style="font-size:9px;"></i>Back to Job Pairs
+                    </button>
+                    <a href="${STAREXEC_URL}/starexec/secure/details/benchmark.jsp?id=${_esc(String(bId))}" target="_blank"
+                       class="flex items-center gap-1.5 transition-colors"
+                       style="font-size:11px;font-weight:500;color:#38bdf8;text-decoration:none;">
+                        View on StarExec<i class="fas fa-arrow-up-right-from-square" style="font-size:9px;margin-left:4px;"></i>
+                    </a>
+                </div>
+            </div>`;
+
+        document.getElementById('bench-modal-close-btn')?.addEventListener('click', _closeBenchmarkModal);
+        document.getElementById('bench-modal-back-btn')?.addEventListener('click',  _closeBenchmarkModal);
+    }
+
+    // ── Page bootstrap ────────────────────────────────────────────────────────────
 
     async function loadJobDetail() {
         const contentEl = document.getElementById('job-content');
         const titleEl   = document.getElementById('job-title');
-        const PAIRS_ID  = `job-pairs-${JOB_ID}`;
+        const PAIRS_ID  = 'job-pairs-' + JOB_ID;
 
-        // Fire both fetches simultaneously — details and spaces race in parallel.
-        const detailsPromise = fetch(`/jobs/${JOB_ID}/json/`)
-            .then(r => r.ok ? r.json() : r.json().then(d => { throw new Error(d.error || `HTTP ${r.status}`); }));
+        // Fire job details + space list in parallel.
+        const detailsPromise = fetch('/jobs/' + JOB_ID + '/json/')
+            .then(r => r.ok ? r.json() : r.json().then(d => { throw new Error(d.error || 'HTTP ' + r.status); }));
+        const spacesPromise = _fetchJobSpaces(JOB_ID);
 
-        const pairsPromise = _fetchJobSpaces(JOB_ID);
-
-        // Render stat grid as soon as job details arrive.
         let job;
         try {
             job = await detailsPromise;
@@ -242,25 +537,25 @@
         }
 
         const stage     = _stage(job);
-        const name      = job.name ?? `Job ${JOB_ID}`;
+        const name      = job.name ?? 'Job ' + JOB_ID;
         const desc      = job.description || '';
-        const owner     = job.userId     != null ? String(job.userId)           : 'none';
-        const framework = job.benchmarkingFramework                             ?? 'none';
+        const owner     = job.userId     != null ? String(job.userId) : 'none';
+        const framework = job.benchmarkingFramework ?? 'none';
         const created   = _formatJobDate(job.createTime);
-        const postProc  = stage.postProcessor?.name                             ?? 'none';
-        const queue     = job.queue?.name                                       ?? 'none';
+        const postProc  = stage.postProcessor?.name ?? 'none';
+        const queue     = job.queue?.name ?? 'none';
         const wallclock = stage.wallclockTimeout ?? job.wallclockTimeout ?? null;
         const cpu       = stage.cpuTimeout       ?? job.cpuTimeout       ?? null;
         const memory    = job.maxMemory != null ? (job.maxMemory / 1073741824).toFixed(1) + ' GB' : 'none';
         const disk      = job.diskSize  != null ? (job.diskSize  / 1073741824).toFixed(2) + ' GB' : 'none';
         const status    = _jobStatus(job);
 
-        document.title = `${name} — StarExec`;
-        titleEl.innerHTML = `<i class="fa-solid fa-list-check text-orange-400 mr-2"></i>${_esc(name)}`;
+        document.title = name + ' \u2014 StarExec';
+        titleEl.innerHTML = '<i class="fa-solid fa-list-check text-orange-400 mr-2"></i>' + _esc(name);
 
-        contentEl.innerHTML = `
-            ${desc ? `<p class="text-gray-500 text-sm mb-5">${_esc(desc)}</p>` : ''}
-            <dl class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        contentEl.innerHTML =
+            (desc ? '<p class="text-gray-500 text-sm mb-5">' + _esc(desc) + '</p>' : '') +
+            `<dl class="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 ${_statCard('Status',                 _esc(status))}
                 ${_statCard('Owner',                  _esc(owner))}
                 ${_statCard('Queue',                  _esc(queue))}
@@ -272,74 +567,138 @@
                 ${_statCard('Max Memory',             _esc(memory))}
                 ${_statCard('Disk Usage',             _esc(disk))}
             </dl>
-
             <div class="mt-8 border-t border-gray-200 pt-6">
-                <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">Job Pairs</h2>
-                <div id="${PAIRS_ID}" class="flex items-center gap-2 text-gray-400 text-sm py-2">
-                    <i class="fas fa-circle-notch fa-spin"></i>
-                    Loading Job Pairs...
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wider">Job Pairs</h2>
+                    <span id="jp-status" class="text-xs text-gray-500 font-mono"></span>
+                </div>
+                <div id="${PAIRS_ID}">
+                    <div class="flex items-center gap-2 text-gray-400 text-sm py-2">
+                        <i class="fas fa-circle-notch fa-spin"></i>
+                        Loading job spaces\u2026
+                    </div>
                 </div>
             </div>`;
 
-        // Populate the pairs accordion once space list arrives.
-        const pairsEl = () => document.getElementById(PAIRS_ID);
+        const pairsEl  = () => document.getElementById(PAIRS_ID);
+        const statusEl = () => document.getElementById('jp-status');
+
+        let spaces;
         try {
-            const spaces = await pairsPromise;
-            if (pairsEl()) pairsEl().outerHTML = `<div id="${PAIRS_ID}">${_renderSpacesList(spaces)}</div>`;
+            spaces = await spacesPromise;
         } catch (err) {
-            if (pairsEl()) pairsEl().innerHTML = `
-                <div class="flex items-center gap-2 text-red-400 text-sm">
-                    <i class="fas fa-exclamation-circle"></i>
-                    Could not load job pairs: ${_esc(err.message)}
-                </div>`;
+            if (pairsEl()) pairsEl().innerHTML =
+                '<div class="flex items-center gap-2 text-red-400 text-sm">' +
+                '<i class="fas fa-exclamation-circle"></i> Could not load job spaces: ' + _esc(err.message) + '</div>';
+            return;
         }
+
+        if (!spaces.length) {
+            if (pairsEl()) pairsEl().innerHTML = '<p class="text-gray-400 text-sm italic">No job pairs found.</p>';
+            return;
+        }
+
+        // Render a labelled placeholder for each space.
+        if (pairsEl()) {
+            pairsEl().innerHTML = spaces.map(({ spaceId, spaceName }) =>
+                '<div class="mb-8" id="space-section-' + spaceId + '">' +
+                    '<h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 pb-1.5 border-b border-gray-100">' +
+                        _esc(spaceName) +
+                    '</h3>' +
+                    '<div id="space-matrix-' + spaceId + '" class="flex items-center gap-2 text-gray-400 text-sm py-2">' +
+                        '<i class="fas fa-circle-notch fa-spin text-xs"></i> Loading pairs\u2026' +
+                    '</div>' +
+                '</div>'
+            ).join('');
+        }
+
+        // Per-space progress tracking for the combined status counter.
+        const spaceProgress = new Map(); // spaceId → { loaded, total }
+
+        function _updateStatus() {
+            const el = statusEl();
+            if (!el) return;
+            let totalLoaded = 0, totalExpected = 0;
+            for (const { loaded, total } of spaceProgress.values()) {
+                totalLoaded   += loaded;
+                totalExpected += total;
+            }
+            if (totalExpected === 0) return;
+            const allDone = [...spaceProgress.values()].every(s => s.loaded >= s.total);
+            if (allDone && spaceProgress.size === spaces.length) {
+                el.innerHTML =
+                    '<i class="fas fa-circle-check text-green-500 mr-1"></i>' +
+                    'Showing all\u00a0<b>' + totalLoaded.toLocaleString() + '</b>\u00a0entries\u00a0across\u00a0' +
+                    spaces.length + '\u00a0space' + (spaces.length !== 1 ? 's' : '');
+            } else {
+                el.innerHTML =
+                    'Loading:\u00a0<b style="font-family:ui-monospace,monospace;">' + totalLoaded.toLocaleString() + '</b>' +
+                    '\u00a0/\u00a0<b style="font-family:ui-monospace,monospace;">' + totalExpected.toLocaleString() + '</b>' +
+                    '\u00a0entries\u2026';
+            }
+        }
+
+        // Fetch all spaces in parallel at CONCURRENCY=4.
+        const CONCURRENCY = 4;
+        let taskIdx = 0;
+        const tasks = spaces.map(({ spaceId }) => async () => {
+            try {
+                const { rows, total: spaceTotal } = await _fetchAllSpacePairs(spaceId, (loaded, total) => {
+                    spaceProgress.set(spaceId, { loaded, total });
+                    _updateStatus();
+                });
+
+                spaceProgress.set(spaceId, { loaded: rows.length, total: Math.max(spaceTotal, rows.length) });
+                _updateStatus();
+
+                const matrixEl = document.getElementById('space-matrix-' + spaceId);
+                if (!matrixEl) return;
+
+                if (!rows.length) {
+                    matrixEl.innerHTML = '<p class="text-gray-400 text-xs italic py-2">No pairs found for this space.</p>';
+                    return;
+                }
+
+                const { benchMap, solvers } = _groupPairsByBenchmark(rows);
+                matrixEl.outerHTML =
+                    '<div id="space-matrix-' + spaceId + '">' +
+                        _renderDomainMatrix(benchMap, solvers) +
+                    '</div>';
+
+            } catch (err) {
+                const matrixEl = document.getElementById('space-matrix-' + spaceId);
+                if (matrixEl) matrixEl.innerHTML =
+                    '<div class="flex items-center gap-2 text-red-400 text-xs py-2">' +
+                        '<i class="fas fa-exclamation-circle"></i> ' + _esc(err.message) +
+                    '</div>';
+            }
+        });
+
+        const worker = async () => { while (taskIdx < tasks.length) await tasks[taskIdx++](); };
+        await Promise.all(Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, worker));
     }
 
     document.addEventListener('DOMContentLoaded', function () {
         loadJobDetail();
 
-        // Event delegation for the lazy-loading pairs accordion.
-        document.getElementById('job-content').addEventListener('click', async function (e) {
-            const header  = e.target.closest('.pair-space-header');
-            if (!header) return;
+        // Benchmark link click — open detail modal.
+        document.addEventListener('click', e => {
+            const a = e.target.closest('.benchmark-info-trigger');
+            if (!a) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const id   = a.dataset.benchmarkId;
+            const name = a.dataset.benchmarkName || '';
+            if (id) _showBenchmarkModal(id, name);
+        });
 
-            const row     = header.closest('.pair-space-row');
-            const detail  = row?.querySelector('.pair-space-detail');
-            const arrow   = header.querySelector('.arrow-icon');
-            const spaceId = parseInt(header.dataset.spaceId, 10);
-            if (!detail || !spaceId) return;
-
-            // Toggle: close if already open.
-            if (!detail.classList.contains('hidden')) {
-                detail.classList.add('hidden');
-                arrow?.classList.remove('rotate-90');
-                return;
-            }
-
-            detail.classList.remove('hidden');
-            arrow?.classList.add('rotate-90');
-
-            if (detail.dataset.loaded === 'true') return;
-
-            detail.innerHTML = `
-                <div class="flex items-center gap-2 text-gray-400 text-sm px-4 py-3">
-                    <i class="fas fa-circle-notch fa-spin text-xs"></i>
-                    <span class="animate-pulse">Loading Job Pair...</span>
-                </div>`;
-
-            try {
-                const rows = await _fetchSpacePairs(spaceId);
-                detail.innerHTML = _renderPairRows(rows);
-                detail.dataset.loaded = 'true';
-                const hint = header.querySelector('span.ml-auto');
-                if (hint) hint.textContent = `${rows.length} pair${rows.length !== 1 ? 's' : ''}`;
-            } catch (err) {
-                detail.innerHTML = `
-                    <div class="flex items-center gap-2 text-red-400 text-sm px-4 py-3">
-                        <i class="fas fa-exclamation-circle"></i>
-                        ${_esc(err.message)}
-                    </div>`;
-            }
+        // Solver column button — open StarExec solver detail in new tab.
+        document.addEventListener('click', e => {
+            const btn = e.target.closest('.solver-col-btn');
+            if (!btn) return;
+            const solverId = btn.dataset.solverId;
+            if (solverId)
+                window.open(STAREXEC_URL + '/starexec/secure/details/solver.jsp?id=' + encodeURIComponent(solverId), '_blank');
         });
     });
 </script>

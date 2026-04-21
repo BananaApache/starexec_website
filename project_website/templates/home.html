@@ -226,7 +226,7 @@
 
 <!-- Create Job Modal -->
 <div id="create-job-modal" class="fixed inset-0 bg-gray-900 bg-opacity-60 hidden flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-    <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
+    <div class="bg-white w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
         <div class="px-6 py-4 border-b flex items-center justify-between bg-gradient-to-r from-orange-50 to-white shrink-0">
             <div class="flex items-center space-x-2">
                 <i class="fa-solid fa-list-check text-orange-500"></i>
@@ -236,9 +236,11 @@
                 <i class="fas fa-times text-lg"></i>
             </button>
         </div>
-        <form id="create-job-form" class="px-6 py-5 space-y-4 overflow-y-auto max-h-[80vh]">
+        <form id="create-job-form" class="px-6 py-5 space-y-4 overflow-y-auto max-h-[85vh]">
             {% csrf_token %}
             <input type="hidden" id="cj-space-id" name="spaceId">
+            <input type="hidden" id="cj-runchoice-input" name="runChoice" value="keepHierarchy">
+            <input type="hidden" id="cj-benchchoice-input" name="benchChoice" value="runAllBenchInHierarchy">
 
             <div>
                 <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Job Name <span class="text-red-500">*</span></label>
@@ -306,22 +308,66 @@
                 </div>
             </div>
 
-            <div class="grid grid-cols-2 gap-3">
-                <div>
-                    <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Run Choice</label>
-                    <select id="cj-runchoice" name="runChoice"
-                        class="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 transition">
-                        <option value="keepHierarchy">Keep Hierarchy</option>
-                        <option value="choose">Choose</option>
-                    </select>
+            <!-- Run Mode selector -->
+            <div>
+                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Run Mode</label>
+                <div id="cj-mode-grid" class="grid grid-cols-3 gap-2">
+                    <button type="button" data-run="keepHierarchy" data-bench="runAllBenchInHierarchy"
+                        class="cj-mode-btn px-3 py-2.5 rounded-lg border-2 text-left transition-all">
+                        <div class="text-xs font-bold">Run All</div>
+                        <div class="text-[10px] text-gray-500 mt-0.5 leading-tight">All solvers &amp; benchmarks in hierarchy</div>
+                    </button>
+                    <button type="button" data-run="choose" data-bench="runAllBenchInSpace"
+                        class="cj-mode-btn px-3 py-2.5 rounded-lg border-2 text-left transition-all">
+                        <div class="text-xs font-bold">Choose Solvers</div>
+                        <div class="text-[10px] text-gray-500 mt-0.5 leading-tight">Select solvers, run all benchmarks in space</div>
+                    </button>
+                    <button type="button" data-run="choose" data-bench="runChosenFromSpace"
+                        class="cj-mode-btn px-3 py-2.5 rounded-lg border-2 text-left transition-all">
+                        <div class="text-xs font-bold">Choose Solvers &amp; Benchmarks</div>
+                        <div class="text-[10px] text-gray-500 mt-0.5 leading-tight">Select specific solvers and benchmarks</div>
+                    </button>
                 </div>
-                <div class="flex items-end pb-2">
-                    <label class="flex items-center space-x-2 cursor-pointer">
-                        <input type="checkbox" id="cj-pause" name="pause" value="true"
-                            class="w-4 h-4 rounded border-gray-300 text-orange-500 focus:ring-orange-300">
-                        <span class="text-sm text-gray-700">Start paused</span>
-                    </label>
+            </div>
+
+            <!-- Solver selection (shown for non-Run-All modes) -->
+            <div id="cj-solver-section" class="hidden">
+                <div class="flex items-center justify-between mb-1">
+                    <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Solvers <span class="text-red-500">*</span></label>
+                    <div class="flex items-center gap-3">
+                        <button type="button" id="cj-solver-select-all"
+                            class="text-[10px] font-medium text-orange-500 hover:text-orange-700 transition">Select All</button>
+                        <span id="cj-solver-count" class="text-[10px] text-gray-400"></span>
+                    </div>
                 </div>
+                <div id="cj-solver-list" class="max-h-44 overflow-y-auto border border-gray-200 rounded-lg bg-gray-50 p-2 space-y-1">
+                    <span class="text-gray-400 text-xs">Loading solvers...</span>
+                </div>
+            </div>
+
+            <!-- Benchmark selection (shown only for "Choose Solvers & Benchmarks" mode) -->
+            <div id="cj-bench-section" class="hidden">
+                <div class="flex items-center justify-between mb-1">
+                    <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Benchmarks <span class="text-red-500">*</span></label>
+                    <div class="flex items-center gap-3">
+                        <button type="button" id="cj-bench-select-all"
+                            class="text-[10px] font-medium text-orange-500 hover:text-orange-700 transition">Select All</button>
+                        <span id="cj-bench-count" class="text-[10px] text-gray-400"></span>
+                    </div>
+                </div>
+                <input type="text" id="cj-bench-search" placeholder="Search benchmarks..."
+                    class="w-full mb-2 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-orange-300 transition">
+                <div id="cj-bench-list" class="max-h-44 overflow-y-auto border border-gray-200 rounded-lg bg-gray-50 p-2 space-y-1">
+                    <span class="text-gray-400 text-xs">Loading benchmarks...</span>
+                </div>
+            </div>
+
+            <div class="flex items-center">
+                <label class="flex items-center space-x-2 cursor-pointer">
+                    <input type="checkbox" id="cj-pause" name="pause" value="true"
+                        class="w-4 h-4 rounded border-gray-300 text-orange-500 focus:ring-orange-300">
+                    <span class="text-sm text-gray-700">Start paused</span>
+                </label>
             </div>
 
             <div id="cj-message" class="hidden text-sm rounded-lg px-3 py-2"></div>
@@ -1420,6 +1466,115 @@
         } catch (error) { showError(error.message); }
     }
 
+    // ── Create Job – mode / solver / benchmark state ─────────────────────────
+    let _cjSolverData = [];  // [{id, name}]
+    let _cjBenchData  = [];  // [{id, name}]
+
+    function _setCjModeActive(activeBtn) {
+        document.querySelectorAll('.cj-mode-btn').forEach(btn => {
+            const on = btn === activeBtn;
+            btn.classList.toggle('border-orange-400', on);
+            btn.classList.toggle('bg-orange-50', on);
+            btn.classList.toggle('border-gray-200', !on);
+            btn.classList.toggle('bg-white', !on);
+            const title = btn.querySelector('div:first-child');
+            if (title) {
+                title.classList.toggle('text-orange-700', on);
+                title.classList.toggle('text-gray-700', !on);
+            }
+        });
+    }
+
+    function _applyCjMode(btn) {
+        const run   = btn.dataset.run;
+        const bench = btn.dataset.bench;
+        document.getElementById('cj-runchoice-input').value  = run;
+        document.getElementById('cj-benchchoice-input').value = bench;
+        _setCjModeActive(btn);
+        const needSolvers = run === 'choose';
+        const needBench   = bench === 'runChosenFromSpace';
+        document.getElementById('cj-solver-section').classList.toggle('hidden', !needSolvers);
+        document.getElementById('cj-bench-section').classList.toggle('hidden',  !needBench);
+    }
+
+    function _renderCjSolverList() {
+        const listEl = document.getElementById('cj-solver-list');
+        const selAllBtn = document.getElementById('cj-solver-select-all');
+        if (!_cjSolverData.length) {
+            listEl.innerHTML = '<span class="text-gray-400 text-xs">No solvers found in this space.</span>';
+            _updateCjSolverCount();
+            return;
+        }
+        listEl.innerHTML = _cjSolverData.map(s =>
+            `<label class="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-white cursor-pointer">
+                <input type="checkbox" class="cj-solver-cb w-3.5 h-3.5 rounded border-gray-300 text-orange-500 focus:ring-orange-300" value="${s.id}">
+                <span class="text-xs text-gray-700 truncate" title="${_esc(s.name)}">${_esc(s.name)}</span>
+            </label>`
+        ).join('');
+        listEl.querySelectorAll('.cj-solver-cb').forEach(cb => cb.addEventListener('change', _updateCjSolverCount));
+        if (selAllBtn) selAllBtn.textContent = 'Select All';
+        _updateCjSolverCount();
+    }
+
+    function _updateCjSolverCount() {
+        const checked = document.querySelectorAll('.cj-solver-cb:checked').length;
+        const el = document.getElementById('cj-solver-count');
+        if (el) el.textContent = checked ? `${checked} / ${_cjSolverData.length} selected` : `${_cjSolverData.length} available`;
+    }
+
+    async function _loadCjBenchmarks(spaceId) {
+        const listEl = document.getElementById('cj-bench-list');
+        listEl.innerHTML = '<span class="text-gray-400 text-xs animate-pulse">Loading benchmarks...</span>';
+        _cjBenchData = [];
+        try {
+            const body = new URLSearchParams({
+                sEcho: '1', iDisplayStart: '0', iDisplayLength: '99999', iSortCol_0: '0',
+            });
+            const data = await _apiFetch(
+                `/starexec/services/space/${spaceId}/benchmarks/pagination`,
+                { method: 'POST', body }
+            );
+            const rows = data?.aaData ?? [];
+            _cjBenchData = rows.map(row => {
+                const html = row[0] ?? '';
+                const idMatch = html.match(/[?&]id=(\d+)/);
+                const name = _extractText(html);
+                return { id: idMatch?.[1] ?? '', name };
+            }).filter(b => b.id);
+            _cjBenchData.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+            _renderCjBenchList('');
+        } catch {
+            listEl.innerHTML = '<span class="text-red-400 text-xs">Failed to load benchmarks.</span>';
+        }
+    }
+
+    function _renderCjBenchList(filter) {
+        const listEl = document.getElementById('cj-bench-list');
+        const selAllBtn = document.getElementById('cj-bench-select-all');
+        const lc = filter.toLowerCase();
+        const items = lc ? _cjBenchData.filter(b => b.name.toLowerCase().includes(lc)) : _cjBenchData;
+        if (!items.length) {
+            listEl.innerHTML = '<span class="text-gray-400 text-xs">No benchmarks found.</span>';
+            _updateCjBenchCount();
+            return;
+        }
+        listEl.innerHTML = items.map(b =>
+            `<label class="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-white cursor-pointer">
+                <input type="checkbox" class="cj-bench-cb w-3.5 h-3.5 rounded border-gray-300 text-orange-500 focus:ring-orange-300" value="${b.id}">
+                <span class="text-xs text-gray-700 truncate" title="${_esc(b.name)}">${_esc(b.name)}</span>
+            </label>`
+        ).join('');
+        listEl.querySelectorAll('.cj-bench-cb').forEach(cb => cb.addEventListener('change', _updateCjBenchCount));
+        if (selAllBtn) selAllBtn.textContent = 'Select All';
+        _updateCjBenchCount();
+    }
+
+    function _updateCjBenchCount() {
+        const checked = document.querySelectorAll('.cj-bench-cb:checked').length;
+        const el = document.getElementById('cj-bench-count');
+        if (el) el.textContent = checked ? `${checked} selected` : `${_cjBenchData.length} available`;
+    }
+
     function openCreateJobModal(spaceId) {
         document.getElementById('create-job-form').reset();
         document.getElementById('cj-space-id').value = spaceId;
@@ -1430,6 +1585,17 @@
         msgEl.classList.add('hidden');
         msgEl.textContent = '';
         document.getElementById('create-job-modal').classList.remove('hidden');
+
+        // Reset mode to "Run All" (first card)
+        _cjSolverData = [];
+        _cjBenchData  = [];
+        const firstModeBtn = document.querySelector('.cj-mode-btn');
+        if (firstModeBtn) _applyCjMode(firstModeBtn);
+        document.getElementById('cj-solver-list').innerHTML = '<span class="text-gray-400 text-xs">Loading solvers...</span>';
+        document.getElementById('cj-bench-list').innerHTML  = '<span class="text-gray-400 text-xs">Loading benchmarks...</span>';
+        document.getElementById('cj-bench-search').value   = '';
+        document.getElementById('cj-solver-select-all').textContent = 'Select All';
+        document.getElementById('cj-bench-select-all').textContent  = 'Select All';
 
         const submitBtn  = document.getElementById('cj-submit');
         const queueSelect = document.getElementById('cj-queue');
@@ -1497,7 +1663,32 @@
                 populateProcessors(postSelect, []);
             });
 
-        Promise.allSettled([queuePromise, processorPromise]).then(() => {
+        // Load solvers for this space (background — used when a choose-mode is selected)
+        const solverPromise = (async () => {
+            try {
+                const body = new URLSearchParams({
+                    sEcho: '1', iDisplayStart: '0', iDisplayLength: '99999', iSortCol_0: '0',
+                });
+                const data = await _apiFetch(
+                    `/starexec/services/space/${spaceId}/solvers/pagination`,
+                    { method: 'POST', body }
+                );
+                const rows = data?.aaData ?? [];
+                _cjSolverData = rows.map(row => {
+                    const html = row[0] ?? '';
+                    const idMatch = html.match(/[?&]id=(\d+)/);
+                    const name = _extractText(html);
+                    return { id: idMatch?.[1] ?? '', name };
+                }).filter(s => s.id);
+                _cjSolverData.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+                _renderCjSolverList();
+            } catch {
+                document.getElementById('cj-solver-list').innerHTML =
+                    '<span class="text-red-400 text-xs">Failed to load solvers.</span>';
+            }
+        })();
+
+        Promise.allSettled([queuePromise, processorPromise, solverPromise]).then(() => {
             submitBtn.disabled = false;
         });
     }
@@ -1531,6 +1722,41 @@
                 loadSpaceContent(form);
             }
         }
+
+        // --- Create Job: mode card clicks ---
+        document.getElementById('cj-mode-grid').addEventListener('click', function(e) {
+            const btn = e.target.closest('.cj-mode-btn');
+            if (!btn) return;
+            _applyCjMode(btn);
+            // If switching to "Choose Benchmarks", trigger benchmark load if not yet loaded
+            if (btn.dataset.bench === 'runChosenFromSpace' && _cjBenchData.length === 0) {
+                const spaceId = document.getElementById('cj-space-id').value;
+                if (spaceId) _loadCjBenchmarks(spaceId);
+            }
+        });
+
+        // --- Create Job: benchmark search ---
+        document.getElementById('cj-bench-search').addEventListener('input', function() {
+            _renderCjBenchList(this.value);
+        });
+
+        // --- Create Job: Select All / Deselect All for solvers ---
+        document.getElementById('cj-solver-select-all').addEventListener('click', function() {
+            const boxes = document.querySelectorAll('.cj-solver-cb');
+            const allChecked = [...boxes].every(cb => cb.checked);
+            boxes.forEach(cb => { cb.checked = !allChecked; });
+            this.textContent = allChecked ? 'Select All' : 'Deselect All';
+            _updateCjSolverCount();
+        });
+
+        // --- Create Job: Select All / Deselect All for benchmarks (respects current filter) ---
+        document.getElementById('cj-bench-select-all').addEventListener('click', function() {
+            const boxes = document.querySelectorAll('.cj-bench-cb');
+            const allChecked = [...boxes].every(cb => cb.checked);
+            boxes.forEach(cb => { cb.checked = !allChecked; });
+            this.textContent = allChecked ? 'Select All' : 'Deselect All';
+            _updateCjBenchCount();
+        });
 
         // --- Sidebar: "Create Job" (+) button on Jobs folder ---
         document.getElementById('spaces-sidebar').addEventListener('click', function(e) {
@@ -1673,6 +1899,34 @@
             const formData = new FormData(this);
             if (!document.getElementById('cj-pause').checked) {
                 formData.set('pause', 'false');
+            }
+
+            // Attach solver/bench selections based on active run mode
+            const runChoice   = document.getElementById('cj-runchoice-input').value;
+            const benchChoice = document.getElementById('cj-benchchoice-input').value;
+            if (runChoice === 'choose') {
+                const checkedSolvers = [...document.querySelectorAll('.cj-solver-cb:checked')].map(cb => cb.value);
+                if (!checkedSolvers.length) {
+                    msgEl.textContent = 'Please select at least one solver.';
+                    msgEl.className = 'text-sm rounded-lg px-3 py-2 bg-yellow-50 text-yellow-700 border border-yellow-200';
+                    msgEl.classList.remove('hidden');
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="fa-solid fa-play mr-2"></i>Create Job';
+                    return;
+                }
+                checkedSolvers.forEach(id => formData.append('solver_ids', id));
+                if (benchChoice === 'runChosenFromSpace') {
+                    const checkedBench = [...document.querySelectorAll('.cj-bench-cb:checked')].map(cb => cb.value);
+                    if (!checkedBench.length) {
+                        msgEl.textContent = 'Please select at least one benchmark.';
+                        msgEl.className = 'text-sm rounded-lg px-3 py-2 bg-yellow-50 text-yellow-700 border border-yellow-200';
+                        msgEl.classList.remove('hidden');
+                        submitBtn.disabled = false;
+                        submitBtn.innerHTML = '<i class="fa-solid fa-play mr-2"></i>Create Job';
+                        return;
+                    }
+                    checkedBench.forEach(id => formData.append('bench', id));
+                }
             }
 
             try {

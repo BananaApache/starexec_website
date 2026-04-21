@@ -706,6 +706,15 @@ def create_job(request):
     pause_val = "yes" if request.POST.get("pause") == "true" else "no"
     pre = request.POST.get("preProcess", "").strip() or "-1"
     post = request.POST.get("postProcess", "").strip() or "-1"
+    run_choice   = request.POST.get("runChoice",   "keepHierarchy")
+    bench_choice = request.POST.get("benchChoice", "runAllBenchInHierarchy")
+
+    # If the frontend sent specific solver IDs, filter the scraped pairs to those solvers
+    requested_solver_ids = set(request.POST.getlist("solver_ids"))
+    if requested_solver_ids:
+        solver_config_pairs = [
+            (s, c) for s, c in solver_config_pairs if s in requested_solver_ids
+        ]
 
     post_pairs = [
         ("sid", space_id),
@@ -728,11 +737,16 @@ def create_job(request):
         ("suppressTimestamp", "no"),
         ("killDelay", "0"),
         ("softTimeLimit", "0"),
-        ("runChoice", request.POST.get("runChoice", "keepHierarchy")),
+        ("runChoice",   run_choice),
+        ("benchChoice", bench_choice),
     ]
     for solver_id, config_id in solver_config_pairs:
         post_pairs.append(("solver", solver_id))
         post_pairs.append(("configs", config_id))
+
+    # Append explicitly selected benchmark IDs (used when benchChoice=runChosenFromSpace)
+    for bench_id in request.POST.getlist("bench"):
+        post_pairs.append(("bench", bench_id))
 
     from urllib.parse import urlencode
     encoded_body = urlencode(post_pairs)

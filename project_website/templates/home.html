@@ -773,7 +773,7 @@
                 <table${matrixAttr} style="min-width:100%; border-collapse:collapse;">
                     <thead style="background:#f9fafb; border-bottom:2px solid #e5e7eb; position:sticky; top:0; z-index:20;">
                         <tr>
-                            <th scope="col" style="${TH_BASE} text-align:left; position:sticky; left:0; background:#f9fafb; border-right:1px solid #e5e7eb; z-index:30;">Domain&nbsp;╲&nbsp;Solver</th>
+                            <th scope="col" style="${TH_BASE} text-align:left; width: 145px; position:sticky; left:0; background:#f9fafb; border-right:1px solid #e5e7eb; z-index:30;">Domain&nbsp;╲&nbsp;Solver</th>
                             ${headerCells}
                         </tr>
                     </thead>
@@ -1001,9 +1001,23 @@
 
         records.forEach((record) => {
             tableHtml += `<tr class="hover:bg-white transition-colors">`;
-            record.forEach(cellContent => {
-                const absoluteCellContent = cellContent.replace(/<img[^>]*src="\/starexec\/images\/external\.png"[^>]*>/g, ' <i class="fas fa-arrow-up-right-from-square text-blue-400 text-xs"></i>');
-                tableHtml += `<td class="px-3 py-2 text-gray-800">${absoluteCellContent}</td>`;
+            record.forEach((cellContent, colIdx) => {
+                let displayContent = cellContent.replace(/<img[^>]*src="\/starexec\/images\/external\.png"[^>]*>/g, ' <i class="fas fa-arrow-up-right-from-square text-blue-400 text-xs"></i>');
+                // Benchmark name column: convert the StarExec detail link into a
+                // benchmark-info-trigger so the existing modal handler fires on click.
+                if (title === 'Problems' && colIdx === 0) {
+                    displayContent = displayContent.replace(
+                        /<a\b[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/i,
+                        (match, href, text) => {
+                            const idMatch = href.match(/[?&]id=(\d+)/);
+                            if (!idMatch) return match;
+                            const id = idMatch[1];
+                            const plainName = text.replace(/<[^>]+>/g, '').trim().replace(/"/g, '&quot;');
+                            return `<a href="#" class="benchmark-info-trigger text-blue-600 hover:text-blue-800 inline-flex items-center gap-1 transition-colors" data-benchmark-id="${id}" data-benchmark-name="${plainName}"><i class="fas fa-magnifying-glass text-[10px] opacity-50"></i>${text}</a>`;
+                        }
+                    );
+                }
+                tableHtml += `<td class="px-3 py-2 text-gray-800">${displayContent}</td>`;
             });
             tableHtml += `</tr>`;
         });
@@ -2075,7 +2089,7 @@
     });
 
     async function _fetchBenchmarkDetails(id) {
-        return _apiFetch(`/starexec/services/benchmarks/${id}/contents?limit=-1`);
+        return _apiFetch(`/starexec/services/benchmarks/${id}/metadata?limit=-1`);
     }
 
     async function _showBenchmarkModal(id, name) {
@@ -2393,7 +2407,7 @@
         if (!benchMap.size)
             return '<p style="padding:24px; font-size:12px; color:#9ca3af; font-style:italic;">No pairs found for this domain.</p>';
 
-        const BENCH_W  = 220;
+        const BENCH_W  = 90;
         const SOLVER_W = 130;
 
         // Build each style string from arrays so no quote characters appear inside
